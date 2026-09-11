@@ -1,0 +1,3526 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>15s品牌时刻反定向剧单调整</title>
+  <script src="xlsx.full.min.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --ink: #18202f;
+      --muted: #667085;
+      --line: #d8dee8;
+      --accent: #176b87;
+      --accent-soft: #e7f4f7;
+      --ok: #16834f;
+      --warn: #b76e00;
+      --bad: #b42318;
+      --shadow: 0 12px 30px rgba(24, 32, 47, 0.08);
+      font-family: "Microsoft YaHei", "PingFang SC", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    button, input, textarea { font: inherit; }
+
+    .app {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .tool-tabs {
+      display: flex;
+      gap: 8px;
+      margin: 0 0 16px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: var(--shadow);
+    }
+
+    .tool-tab {
+      min-height: 38px;
+      padding: 0 14px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .tool-tab.active {
+      background: var(--accent-soft);
+      border-color: #b9dce5;
+      color: var(--accent);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--warn);
+    }
+
+    .upload-zone {
+      min-height: 144px;
+      border: 1.5px dashed #a8b3c4;
+      border-radius: 8px;
+      background: var(--panel);
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) minmax(320px, 430px);
+      align-items: stretch;
+      gap: 16px;
+      width: 100%;
+      padding: 22px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow);
+      transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+    }
+
+    .upload-zone.is-over {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      transform: translateY(-1px);
+    }
+
+    .upload-inner {
+      display: grid;
+      gap: 12px;
+      justify-items: center;
+      text-align: center;
+      max-width: 640px;
+      align-content: center;
+    }
+
+    .upload-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 23px;
+      font-weight: 800;
+    }
+
+    .upload-title {
+      font-weight: 700;
+      font-size: 16px;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+      margin: 0;
+    }
+
+    .primary-btn, .secondary-btn {
+      min-height: 38px;
+      border-radius: 6px;
+      padding: 0 14px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      font-weight: 650;
+    }
+
+    .primary-btn { background: var(--accent); color: white; }
+    .secondary-btn { background: #fff; color: var(--ink); border-color: var(--line); }
+    .primary-btn:disabled, .secondary-btn:disabled { opacity: 0.48; cursor: not-allowed; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(320px, 430px) minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .preview-panel,
+    .result-panel,
+    .abnormal-panel {
+      grid-column: 1 / -1;
+    }
+
+    .result-panel { order: 2; }
+    .abnormal-panel { order: 3; }
+    .preview-panel { order: 4; }
+
+    .brand-summary-panel {
+      min-height: 320px;
+      display: grid;
+      align-content: start;
+    }
+
+    .config-panel.is-wide {
+      grid-column: 1 / -1;
+    }
+
+    .adjustment-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .adjustment-summary-grid .field {
+      margin-bottom: 0;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .panel-header {
+      padding: 15px 16px 12px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.2;
+    }
+
+    .panel-body { padding: 16px; }
+
+    .field {
+      display: grid;
+      gap: 7px;
+      margin-bottom: 14px;
+    }
+
+    label {
+      color: #344054;
+      font-weight: 650;
+      font-size: 13px;
+    }
+
+    textarea, input[type="number"] {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      outline: none;
+    }
+
+    textarea {
+      min-height: 116px;
+      padding: 9px 10px;
+      resize: vertical;
+      line-height: 1.45;
+    }
+
+    input[type="number"] {
+      min-height: 36px;
+      padding: 7px 9px;
+    }
+
+    textarea:focus, input[type="number"]:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(23, 107, 135, 0.14);
+    }
+
+    .template-table, .result-table-wrap, .preview-table-wrap {
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+
+    .template-table table { min-width: 420px; }
+
+    .rule-box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 10px 12px;
+      color: #344054;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .rule-box ol {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .file-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .file-item {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fbfcfe;
+      font-size: 13px;
+    }
+
+    .file-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 650;
+    }
+
+    .file-meta {
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .actions, .preview-tools {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: end;
+    }
+
+    .actions { margin-top: 16px; }
+
+    .upload-side {
+      display: grid;
+      align-content: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .upload-side .field,
+    .upload-side .actions {
+      margin: 0;
+    }
+
+    .tool-field {
+      display: grid;
+      gap: 5px;
+      min-width: 118px;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcfe;
+      min-height: 74px;
+    }
+
+    .metric-value {
+      font-size: 24px;
+      font-weight: 800;
+      line-height: 1.1;
+    }
+
+    .metric-label {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .result-table-wrap { max-height: 520px; }
+    .preview-table-wrap { max-height: 520px; min-height: 260px; }
+
+    table {
+      width: 100%;
+      min-width: 760px;
+      border-collapse: separate;
+      border-spacing: 0;
+      background: #fff;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      font-size: 13px;
+      white-space: nowrap;
+      background: #fff;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      background: #f2f5f9;
+      z-index: 4;
+      color: #344054;
+    }
+
+    .file-preview-block {
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+      min-width: max-content;
+    }
+
+    .file-preview-block:last-child { border-bottom: 0; }
+
+    .file-preview-title {
+      margin: 0 0 8px;
+      font-weight: 750;
+      font-size: 13px;
+      color: #344054;
+    }
+
+    .preprocess-note {
+      display: grid;
+      gap: 4px;
+      margin: 8px 0 10px;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fbfcfe;
+      color: #344054;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .time-slot-result {
+      margin: 8px 0 10px;
+      padding: 12px 14px;
+      border: 1px solid #f5c542;
+      border-left: 5px solid #d79200;
+      border-radius: 6px;
+      background: #fff7d6;
+      color: #533f03;
+      font-weight: 750;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .no-change-result {
+      margin: 0;
+      padding: 14px 16px;
+      border: 1px solid #a8d8bd;
+      border-left: 5px solid var(--ok);
+      border-radius: 6px;
+      background: #e8f6ef;
+      color: var(--ok);
+      font-weight: 800;
+      font-size: 16px;
+      line-height: 1.55;
+      text-align: left;
+    }
+
+    .no-change-message {
+      color: var(--ok);
+      font-weight: 800;
+      font-size: 18px;
+    }
+
+    .brand-summary-panel .no-change-result {
+      margin-top: 0;
+      border-color: #a8d8bd;
+      border-left-color: var(--ok);
+      background: #e8f6ef;
+      color: var(--ok);
+    }
+
+    .brand-summary-panel .warn-summary {
+      margin-top: 0;
+      border-color: #f5c542;
+      border-left-color: #d79200;
+      background: #fff7d6;
+      color: var(--warn);
+    }
+
+    .settlement-result {
+      white-space: normal;
+    }
+
+    .settlement-result.warn-summary {
+      border-color: #f5c542;
+      border-left-color: #d79200;
+      background: #fff7d6;
+      color: var(--warn);
+    }
+
+    .settlement-result.danger-summary {
+      border-color: #f0b4ac;
+      border-left-color: var(--bad);
+      background: #fff1f0;
+      color: var(--bad);
+    }
+
+    .scenario-notice {
+      margin-top: 12px;
+      border-color: #f5c542;
+      border-left-color: #d79200;
+      background: #fff7d6;
+      color: var(--warn);
+    }
+
+    .scenario-notice.danger-summary {
+      border-color: #f0b4ac;
+      border-left-color: var(--bad);
+      background: #fff1f0;
+      color: var(--bad);
+    }
+
+    .scenario-preview {
+      min-height: 92px;
+      max-height: 220px;
+    }
+
+    .scenario-preview .no-change-result {
+      white-space: normal;
+    }
+
+    .scenario-line {
+      display: block;
+      margin: 0 0 6px;
+    }
+
+    .scenario-line:last-child {
+      margin-bottom: 0;
+    }
+
+    .summary-detail-list {
+      margin: 10px 0 0;
+      padding-left: 18px;
+      font-size: 13px;
+      line-height: 1.7;
+      font-weight: 700;
+    }
+
+    .clickable-result-row {
+      cursor: pointer;
+    }
+
+    .clickable-result-row:hover td {
+      background: #eef6ff;
+    }
+
+    .focused-preview-row td {
+      background: #eaf2ff !important;
+      box-shadow: inset 0 2px 0 #2563eb, inset 0 -2px 0 #2563eb;
+    }
+
+    .focused-preview-row .yellow-cell {
+      background: #fff39a !important;
+    }
+
+    .focused-preview-cell {
+      background: #dbeafe !important;
+      outline: 3px solid #2563eb;
+      outline-offset: -3px;
+      font-weight: 750;
+    }
+
+    .abnormal-filter-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 0 0 12px;
+      align-items: end;
+    }
+
+    .abnormal-filter-field {
+      display: grid;
+      gap: 6px;
+      margin: 0;
+    }
+
+    .abnormal-filter-field label {
+      color: #344054;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .header-filter {
+      width: 100%;
+      min-width: 120px;
+      height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0 10px;
+      font-weight: 650;
+    }
+
+    .header-filter:hover,
+    .header-filter:focus {
+      border-color: var(--accent);
+      background: #fff;
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(23, 107, 135, 0.12);
+    }
+
+    .header-filter.is-active {
+      border-color: #b9dce5;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    @media (max-width: 920px) {
+      .abnormal-filter-grid { grid-template-columns: 1fr; }
+    }
+
+    .preview-text {
+      min-width: 960px;
+      margin: 0;
+      white-space: pre;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #344054;
+    }
+
+    .preview-table {
+      width: max-content;
+      min-width: 960px;
+      table-layout: fixed;
+    }
+
+    .preview-table th,
+    .preview-table td {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .resize-handle {
+      position: absolute;
+      top: 0;
+      right: -3px;
+      width: 6px;
+      height: 100%;
+      cursor: col-resize;
+      user-select: none;
+      z-index: 8;
+    }
+
+    .sticky-col {
+      position: sticky;
+      z-index: 3;
+      box-shadow: 1px 0 0 var(--line);
+    }
+
+    .sticky-row {
+      position: sticky;
+      z-index: 5;
+      box-shadow: 0 1px 0 var(--line);
+    }
+
+    th.sticky-col { z-index: 6; }
+    .sticky-row.sticky-col { z-index: 7; }
+    .yellow-cell { background: #fff39a !important; }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+
+    .tag.ok { color: var(--ok); background: #e8f6ef; }
+    .tag.warn { color: var(--warn); background: #fff3df; }
+    .tag.bad { color: var(--bad); background: #ffeceb; }
+
+    .empty-state {
+      min-height: 220px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      text-align: center;
+      padding: 24px;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+
+    .preview {
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: #344054;
+      font-size: 12px;
+      line-height: 1.5;
+      max-height: 140px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+      background: #fbfcfe;
+    }
+
+    .hidden { display: none !important; }
+
+    @media (max-width: 920px) {
+      .layout, .summary { grid-template-columns: 1fr; }
+      .upload-zone { grid-template-columns: 1fr; }
+      .adjustment-summary-grid { grid-template-columns: 1fr; }
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .app { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <div class="topbar">
+      <h1 id="appTitle">15s品牌时刻反定向剧单调整</h1>
+      <div class="status-pill" aria-live="polite">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">等待上传文件和粘贴表格</span>
+      </div>
+    </div>
+
+    <section class="upload-zone" id="dropZone" aria-label="文件上传">
+      <div class="upload-inner">
+        <div class="upload-icon">↑</div>
+        <div>
+          <div class="upload-title" id="uploadTitle">上传或拖拽待核对文件</div>
+        <p class="hint" id="uploadHint">将新文件拖入此处会自动替换当前文件和核对结果，并读取新文件。支持 CSV、TXT、JSON、XLSX、XLS、EML、MSG。</p>
+        </div>
+        <button class="primary-btn" id="chooseFileBtn" type="button">选择文件</button>
+        <input class="hidden" id="fileInput" type="file" multiple accept=".csv,.txt,.json,.xlsx,.xls,.eml,.msg">
+      </div>
+      <div class="upload-side">
+        <div class="field">
+          <label>已读取文件</label>
+          <div id="fileList" class="file-list">
+            <div class="hint">暂无文件</div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="primary-btn" id="runCheckBtn" type="button" disabled>开始核对</button>
+          <button class="secondary-btn" id="clearBtn" type="button">清空</button>
+          <button class="secondary-btn" id="exportBtn" type="button" disabled>导出 XLSX</button>
+        </div>
+        <div id="toolNoticeArea" class="hidden"></div>
+      </div>
+    </section>
+
+    <nav class="tool-tabs" aria-label="功能切换">
+      <button class="tool-tab active" id="brandToolTab" type="button" data-tool="brand">品牌时刻反定向剧单校验</button>
+      <button class="tool-tab" id="adjustmentToolTab" type="button" data-tool="adjustment">绿排期修改字段识别</button>
+      <button class="tool-tab" id="settlementToolTab" type="button" data-tool="settlement">实际结算</button>
+    </nav>
+
+    <section class="layout">
+      <aside class="panel config-panel" id="configPanel">
+        <div class="panel-header">
+          <h2 class="panel-title" id="configTitle">核对配置</h2>
+        </div>
+        <div class="panel-body">
+          <div class="field brand-only">
+            <label for="referenceTableText">粘贴待核对表格</label>
+            <textarea id="referenceTableText" placeholder="序号	节目	奇谱ID	更新时间
+1	剧名A	QP000001	2026-07-08
+2	剧名B	QP000002	2026-07-08"></textarea>
+          </div>
+
+          <textarea id="ruleText" class="hidden"></textarea>
+
+          <div class="field brand-only">
+            <label>识别到的节目</label>
+            <div id="programPreview" class="preview">粘贴四列表格后，将在这里显示第二列“节目”的剧名。</div>
+          </div>
+
+          <div class="adjustment-summary-grid adjustment-only hidden">
+            <div class="field">
+              <label>检测到改单场景</label>
+              <div id="adjustmentScenarioPreview" class="preview scenario-preview">上传绿排期并识别后，将在这里显示检测到的改单场景。</div>
+            </div>
+
+            <div class="field">
+              <label>检测到预定量调整</label>
+              <div id="adjustmentVolumePreview" class="preview scenario-preview">预定量有调整时，将在这里显示预定量和购买量比例。</div>
+            </div>
+          </div>
+
+        </div>
+      </aside>
+
+      <section class="brand-summary-panel hidden" id="brandSummaryPanel" aria-live="polite"></section>
+
+      <section class="panel preview-panel">
+        <div class="panel-header">
+          <h2 class="panel-title">绿排期预览</h2>
+          <span class="hint">预处理后预览，可调整列宽和冻结行列</span>
+        </div>
+        <div class="panel-body">
+          <div class="preview-tools" aria-label="预览控制">
+            <div class="tool-field">
+              <label for="freezeRowsInput">冻结行数</label>
+              <input id="freezeRowsInput" type="number" min="0" value="1">
+            </div>
+            <div class="tool-field">
+              <label for="freezeColsInput">冻结列数</label>
+              <input id="freezeColsInput" type="number" min="0" value="0">
+            </div>
+            <button class="secondary-btn" id="applyFreezeBtn" type="button">应用</button>
+          </div>
+          <p class="hint" style="margin: 10px 0;">拖拽表头右侧边线可调整列宽；冻结行列用于查看大表。为避免超大表卡死，默认预览前 40 行、120 列；点击结果或字段明细中的具体行，可定位显示对应行和字段单元格。</p>
+          <div id="contentPreview" class="preview-table-wrap">
+            <div class="empty-state">上传文件后显示绿排期内容。</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel abnormal-panel">
+        <div class="panel-header">
+          <h2 class="panel-title" id="abnormalTitle">异常字段</h2>
+          <span class="hint" id="abnormalSummaryText">暂无异常</span>
+        </div>
+        <div class="panel-body">
+          <div id="abnormalEmptyState" class="empty-state">核对后如有异常，会在这里列出异常行的订单项名称和异常字段。</div>
+          <div class="abnormal-filter-grid hidden" id="abnormalFilterGrid">
+            <div class="abnormal-filter-field">
+              <label for="abnormalFieldFilter" id="abnormalFieldFilterLabel">异常字段</label>
+              <select id="abnormalFieldFilter" class="header-filter" title="筛选字段" aria-label="筛选字段"></select>
+            </div>
+            <div class="abnormal-filter-field">
+              <label for="abnormalValueFilter">当前值</label>
+              <select id="abnormalValueFilter" class="header-filter" title="筛选当前值" aria-label="筛选当前值"></select>
+            </div>
+            <div class="abnormal-filter-field">
+              <label for="abnormalMessageFilter">说明</label>
+              <select id="abnormalMessageFilter" class="header-filter" title="筛选说明" aria-label="筛选说明"></select>
+            </div>
+          </div>
+          <div class="result-table-wrap hidden" id="abnormalWrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>行号</th>
+                  <th>订单项ID</th>
+                  <th>订单项名称</th>
+                  <th id="abnormalFieldHeader">异常字段</th>
+                  <th>单元格</th>
+                  <th>当前值</th>
+                  <th>说明</th>
+                </tr>
+              </thead>
+              <tbody id="abnormalBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel result-panel">
+        <div class="panel-header">
+          <h2 class="panel-title" id="resultTitle">核对结果</h2>
+          <span class="hint" id="lastRunText">尚未执行</span>
+        </div>
+        <div class="panel-body">
+          <div class="summary" id="summary">
+            <div class="metric">
+              <div class="metric-value" id="totalCount">0</div>
+              <div class="metric-label" id="totalCountLabel">扫描行数</div>
+            </div>
+            <div class="metric">
+              <div class="metric-value" id="passCount">0</div>
+              <div class="metric-label" id="passCountLabel">15s品牌时刻行数</div>
+            </div>
+            <div class="metric">
+              <div class="metric-value" id="warnCount">0</div>
+              <div class="metric-label" id="warnCountLabel">异常字段</div>
+            </div>
+            <div class="metric">
+              <div class="metric-value" id="failCount">0</div>
+              <div class="metric-label" id="failCountLabel">异常行数</div>
+            </div>
+          </div>
+
+          <div id="emptyState" class="empty-state">
+            <div>
+              <strong>等待核对</strong>
+              <p class="hint">上传待核对文件，并粘贴包含“序号、节目、奇谱ID、更新时间”的四列表格后开始核对。</p>
+            </div>
+          </div>
+
+          <div class="result-table-wrap hidden" id="resultWrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>文件</th>
+                  <th>工作表</th>
+                  <th>行号</th>
+                  <th>订单项名称</th>
+                  <th>核对规则</th>
+                  <th>核对结果</th>
+                  <th id="resultFieldHeader">异常字段</th>
+                  <th>说明</th>
+                </tr>
+              </thead>
+              <tbody id="resultBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const FIXED_RULES = [
+      "检测 D 列为品牌时刻且 H 列广告时长为 15s 的行，AJ 列是否标黄，且赋值必须与识别节目对应的“(反)剧名”完全一致，不能多、不能少、不能出现“(正)”。",
+      "忽略 BW 列标黄、以及 CA 列标黄且赋值为 0 的单元格，检测是否有其他单元格标黄。"
+    ];
+    const COL_D = 3;
+    const COL_H = 7;
+    const COL_U = 20;
+    const COL_AJ = 35;
+    const COL_R = 17;
+    const COL_BH = 59;
+    const COL_BV = 73;
+    const COL_BW = 74;
+    const COL_BZ = 77;
+    const COL_CA = 78;
+    const SCHEDULE_START_COL = 86;
+    const PREVIEW_ROW_LIMIT = 40;
+    const PREVIEW_COL_LIMIT = 120;
+    const GREEN_SCHEDULE_SHEET_LIMIT = 1;
+    const HEADER_YELLOW_START_ROW = 4;
+    const HEADER_YELLOW_END_ROW = 8;
+    const TIME_SLOT_DETECT_START_ROW_NUMBER = 14;
+    const TIME_SLOT_START_ROW_NUMBER = 15;
+
+    const state = {
+      activeTool: "brand",
+      files: [],
+      combinedText: "",
+      referenceRows: [],
+      ruleNotes: "",
+      results: [],
+      abnormalFields: [],
+      unmodifiedBrandItems: [],
+      adjustmentScenario: null,
+      adjustmentVolumeRatios: null,
+      settlementSummary: null,
+      previewTables: [],
+      previewFocus: null,
+      abnormalColumnFilters: {
+        field: "",
+        value: "",
+        message: ""
+      },
+      stats: {
+        scannedRows: 0,
+        pdbRows: 0,
+        abnormalFields: 0,
+        abnormalRows: 0
+      }
+    };
+
+    const fileInput = document.querySelector("#fileInput");
+    const chooseFileBtn = document.querySelector("#chooseFileBtn");
+    const dropZone = document.querySelector("#dropZone");
+    const uploadTitle = document.querySelector("#uploadTitle");
+    const uploadHint = document.querySelector("#uploadHint");
+    const fileList = document.querySelector("#fileList");
+    const contentPreview = document.querySelector("#contentPreview");
+    const configPanel = document.querySelector("#configPanel");
+    const referenceTableText = document.querySelector("#referenceTableText");
+    const ruleText = document.querySelector("#ruleText");
+    const programPreview = document.querySelector("#programPreview");
+    const runCheckBtn = document.querySelector("#runCheckBtn");
+    const clearBtn = document.querySelector("#clearBtn");
+    const exportBtn = document.querySelector("#exportBtn");
+    const resultBody = document.querySelector("#resultBody");
+    const resultWrap = document.querySelector("#resultWrap");
+    const emptyState = document.querySelector("#emptyState");
+    const abnormalBody = document.querySelector("#abnormalBody");
+    const abnormalWrap = document.querySelector("#abnormalWrap");
+    const abnormalEmptyState = document.querySelector("#abnormalEmptyState");
+    const abnormalSummaryText = document.querySelector("#abnormalSummaryText");
+    const abnormalFilterGrid = document.querySelector("#abnormalFilterGrid");
+    const abnormalFieldFilter = document.querySelector("#abnormalFieldFilter");
+    const abnormalValueFilter = document.querySelector("#abnormalValueFilter");
+    const abnormalMessageFilter = document.querySelector("#abnormalMessageFilter");
+    const freezeRowsInput = document.querySelector("#freezeRowsInput");
+    const freezeColsInput = document.querySelector("#freezeColsInput");
+    const applyFreezeBtn = document.querySelector("#applyFreezeBtn");
+    const lastRunText = document.querySelector("#lastRunText");
+    const statusDot = document.querySelector("#statusDot");
+    const statusText = document.querySelector("#statusText");
+    const appTitle = document.querySelector("#appTitle");
+    const toolNoticeArea = document.querySelector("#toolNoticeArea");
+    const brandSummaryPanel = document.querySelector("#brandSummaryPanel");
+    const adjustmentScenarioPreview = document.querySelector("#adjustmentScenarioPreview");
+    const adjustmentVolumePreview = document.querySelector("#adjustmentVolumePreview");
+    const brandToolTab = document.querySelector("#brandToolTab");
+    const adjustmentToolTab = document.querySelector("#adjustmentToolTab");
+    const settlementToolTab = document.querySelector("#settlementToolTab");
+    const configTitle = document.querySelector("#configTitle");
+    const abnormalTitle = document.querySelector("#abnormalTitle");
+    const abnormalFieldHeader = document.querySelector("#abnormalFieldHeader");
+    const abnormalFieldFilterLabel = document.querySelector("#abnormalFieldFilterLabel");
+    const resultTitle = document.querySelector("#resultTitle");
+    const resultFieldHeader = document.querySelector("#resultFieldHeader");
+    const totalCountLabel = document.querySelector("#totalCountLabel");
+    const passCountLabel = document.querySelector("#passCountLabel");
+    const warnCountLabel = document.querySelector("#warnCountLabel");
+    const failCountLabel = document.querySelector("#failCountLabel");
+
+    chooseFileBtn.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", (event) => handleFiles(event.target.files));
+    brandToolTab.addEventListener("click", () => switchTool("brand"));
+    adjustmentToolTab.addEventListener("click", () => switchTool("adjustment"));
+    settlementToolTab.addEventListener("click", () => switchTool("settlement"));
+    referenceTableText.addEventListener("input", handleReferenceInput);
+    ruleText.addEventListener("input", () => { state.ruleNotes = ruleText.value.trim(); });
+    runCheckBtn.addEventListener("click", runCheck);
+    clearBtn.addEventListener("click", clearAll);
+    exportBtn.addEventListener("click", exportResults);
+    applyFreezeBtn.addEventListener("click", applyFreeze);
+      freezeRowsInput.addEventListener("change", applyFreeze);
+      freezeColsInput.addEventListener("change", applyFreeze);
+      resultBody.addEventListener("click", handleResultRowClick);
+      abnormalBody.addEventListener("click", handleResultRowClick);
+      [abnormalFieldFilter, abnormalValueFilter, abnormalMessageFilter].forEach((select) => {
+        select.addEventListener("change", handleAbnormalColumnFilter);
+      });
+      contentPreview.addEventListener("click", handlePreviewClick);
+      document.addEventListener("click", handleDocumentClick);
+      setupDropZone(dropZone);
+      switchTool("brand", { keepResults: true });
+
+    function setupDropZone(zone) {
+      ["dragenter", "dragover"].forEach((eventName) => {
+        zone.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          zone.classList.add("is-over");
+        });
+      });
+
+      ["dragleave", "drop"].forEach((eventName) => {
+        zone.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          zone.classList.remove("is-over");
+        });
+      });
+
+      zone.addEventListener("drop", (event) => {
+        const files = event.dataTransfer.files;
+        if (files && files.length) handleFiles(files);
+      });
+    }
+
+    function switchTool(tool, options = {}) {
+      state.activeTool = tool;
+      brandToolTab.classList.toggle("active", tool === "brand");
+      adjustmentToolTab.classList.toggle("active", tool === "adjustment");
+      settlementToolTab.classList.toggle("active", tool === "settlement");
+      configPanel.classList.toggle("is-wide", tool === "adjustment");
+      configPanel.classList.toggle("hidden", tool === "settlement");
+      document.querySelectorAll(".brand-only").forEach((node) => {
+        node.classList.toggle("hidden", tool !== "brand");
+      });
+      document.querySelectorAll(".adjustment-only").forEach((node) => {
+        node.classList.toggle("hidden", tool !== "adjustment");
+      });
+
+      appTitle.textContent = getToolTitle(tool);
+      configTitle.textContent = tool === "brand" ? "核对配置" : "修改字段识别";
+      runCheckBtn.textContent = getRunButtonText(tool);
+      abnormalTitle.textContent = tool === "brand" ? "异常字段" : "调整字段检测";
+      abnormalFieldHeader.textContent = tool === "brand" ? "异常字段" : "修改字段";
+      abnormalFieldFilterLabel.textContent = tool === "brand" ? "异常字段" : "修改字段";
+      resultTitle.textContent = tool === "brand" ? "核对结果" : "识别结果";
+      resultFieldHeader.textContent = tool === "brand" ? "异常字段" : "修改字段";
+      updateUploadCopy(tool);
+      totalCountLabel.textContent = "扫描行数";
+      passCountLabel.textContent = tool === "brand" ? "15s品牌时刻行数" : tool === "settlement" ? "识别排期" : "调整行数";
+      warnCountLabel.textContent = tool === "brand" ? "异常字段" : tool === "settlement" ? "核对提示" : "调整字段";
+      failCountLabel.textContent = tool === "brand" ? "异常行数" : tool === "settlement" ? "调整行数" : "调整行数";
+      renderResultEmptyState();
+
+      if (!options.keepResults) {
+        state.results = [];
+        state.abnormalFields = [];
+        state.unmodifiedBrandItems = [];
+        state.adjustmentScenario = null;
+        state.adjustmentVolumeRatios = null;
+        state.settlementSummary = null;
+        resetAbnormalColumnFilters();
+        state.previewFocus = null;
+        resetStats();
+        renderResults();
+        renderAbnormalFields();
+        renderToolNotice();
+        renderBrandSummary();
+        renderAdjustmentScenarioPreview();
+        renderFiles();
+        lastRunText.textContent = "尚未执行";
+      }
+
+      updateReadyState();
+      setStatus(getWaitingStatusText(tool), "warn");
+    }
+
+    function getToolTitle(tool) {
+      if (tool === "brand") return "15s品牌时刻反定向剧单调整";
+      if (tool === "settlement") return "实际结算";
+      return "绿排期修改字段识别";
+    }
+
+    function getRunButtonText(tool) {
+      if (tool === "brand") return "开始核对";
+      if (tool === "settlement") return "开始识别";
+      return "识别修改字段";
+    }
+
+    function getWaitingStatusText(tool) {
+      if (tool === "brand") return "等待上传文件和粘贴表格";
+      if (tool === "settlement") return "等待上传实结邮件或排期文件";
+      return "等待上传绿排期文件";
+    }
+
+    function updateUploadCopy(tool) {
+      uploadTitle.textContent = tool === "settlement" ? "上传或拖拽实结邮件/排期附件" : "上传或拖拽待核对文件";
+      uploadHint.textContent = tool === "settlement"
+        ? "可一次选择多个文件，也可分批拖入追加。建议同时上传客户排期、执行排期、绿排期；静态网页暂不能直接拆解 MSG 邮件附件。支持 CSV、TXT、JSON、XLSX、XLS、EML、MSG。"
+        : "将新文件拖入此处会自动替换当前文件和核对结果，并读取新文件。支持 CSV、TXT、JSON、XLSX、XLS、EML、MSG。";
+    }
+
+    function getCompletionStatusTone(checked) {
+      if (state.activeTool === "settlement") {
+        if ((checked.settlementSummary || {}).status === "bad") return "bad";
+        if ((checked.settlementSummary || {}).status === "warn") return "warn";
+        return "ok";
+      }
+      if (state.activeTool === "adjustment" && !checked.stats.abnormalFields) return "bad";
+      return "ok";
+    }
+
+    async function handleFiles(fileListLike) {
+      const incomingFiles = Array.from(fileListLike);
+      if (!incomingFiles.length) return;
+      if (state.activeTool === "settlement") {
+        resetRunStateOnly();
+      } else {
+        resetUploadedFilesOnly();
+      }
+      setStatus("正在读取文件", "warn");
+
+      for (const file of incomingFiles) {
+        const parsed = await readSupportedFile(file);
+        state.files.push({
+          name: file.name,
+          size: file.size,
+          source: "上传文件",
+          type: file.type || getExtension(file.name),
+          text: parsed.text,
+          tables: parsed.tables
+        });
+      }
+
+      syncCombinedText();
+      renderFiles();
+      updateReadyState();
+      fileInput.value = "";
+      setStatus(state.activeTool === "settlement" ? "文件已加入，可继续上传或开始识别" : "新文件读取完成", "ok");
+    }
+
+    async function readSupportedFile(file) {
+      const ext = getExtension(file.name);
+      if (ext === "xlsx" || ext === "xls") return readExcelFile(file);
+
+      const text = await readFileAsText(file);
+      return { text, tables: parseTextTables(text, file.name) };
+    }
+
+    function readFileAsText(file) {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => resolve("");
+        reader.readAsText(file, "utf-8");
+      });
+    }
+
+    function readExcelFile(file) {
+      return new Promise((resolve) => {
+        if (!window.XLSX) {
+          const message = `【${file.name}】未能读取：Excel 解析库未加载。`;
+          resolve({ text: message, tables: [] });
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const workbook = XLSX.read(event.target.result, {
+              type: "array",
+              cellStyles: true,
+              cellDates: true
+            });
+            const greenScheduleSheetNames = workbook.SheetNames.slice(0, GREEN_SCHEDULE_SHEET_LIMIT);
+            const tables = greenScheduleSheetNames.map((sheetName) => {
+              const sheet = workbook.Sheets[sheetName];
+              const range = XLSX.utils.decode_range(sheet["!ref"] || "A1:A1");
+              const rows = [];
+              const cells = [];
+              for (let r = range.s.r; r <= range.e.r; r += 1) {
+                const row = [];
+                const cellRow = [];
+                for (let c = range.s.c; c <= range.e.c; c += 1) {
+                  const address = XLSX.utils.encode_cell({ r, c });
+                  const cell = sheet[address];
+                  const value = cell ? formatCellValue(cell) : "";
+                  const meta = {
+                    address,
+                    rowIndex: r,
+                    colIndex: c,
+                    value,
+                    yellow: isYellowCell(cell),
+                    style: cell && cell.s ? cell.s : null
+                  };
+                  row.push(value);
+                  cellRow.push(meta);
+                }
+                rows.push(row);
+                cells.push(cellRow);
+              }
+              const table = { name: sheetName, rows, cells };
+              table.preprocess = preprocessTable(table);
+              return table;
+            });
+            resolve({
+              text: tables.map((table) => table.rows.map((row) => row.join("\t")).join("\n")).join("\n\n"),
+              tables
+            });
+          } catch (error) {
+            const message = `【${file.name}】未能读取：${error.message}`;
+            resolve({ text: message, tables: [] });
+          }
+        };
+        reader.onerror = () => resolve({ text: "", tables: [] });
+        reader.readAsArrayBuffer(file);
+      });
+    }
+
+    function formatCellValue(cell) {
+      if (!cell) return "";
+      if (cell.w != null) return String(cell.w);
+      if (cell.v == null) return "";
+      if (cell.v instanceof Date) return cell.v.toLocaleString("zh-CN");
+      return String(cell.v);
+    }
+
+    function parseTextTables(text, name) {
+      const rows = text.split(/\r?\n/).filter((line) => line.trim()).map(splitTableLine);
+      const hasTableShape = rows.length > 0 && rows.some((row) => row.length > 1);
+      const cells = rows.map((row, r) => row.map((value, c) => ({
+        address: `${columnName(c)}${r + 1}`,
+        rowIndex: r,
+        colIndex: c,
+        value,
+        yellow: false,
+        style: null
+      })));
+      if (!hasTableShape) return [];
+      const table = { name, rows, cells };
+      table.preprocess = preprocessTable(table);
+      return [table];
+    }
+
+    function preprocessTable(table) {
+      const rows = table.rows || [];
+      const cells = table.cells || [];
+      const hiddenCols = new Set();
+      const notices = [];
+      const fieldRow = getFieldRow(table);
+      const timeSlotField = fieldLabel(fieldRow, COL_U);
+
+      const headerHasYellow = cells
+        .slice(HEADER_YELLOW_START_ROW, HEADER_YELLOW_END_ROW + 1)
+        .some((row) => (row || []).some((cell) => cell && cell.yellow));
+      if (!headerHasYellow) {
+        hiddenCols.add(0);
+        notices.push("表头第5-9行未检测到标黄单元格，预览中已按规则隐藏A列。");
+      } else {
+        notices.push("表头第5-9行检测到标黄单元格，保留A列显示。");
+      }
+
+      const uCells = cells
+        .map((row, rowIndex) => ({ rowIndex, cell: row ? row[COL_U] : null }))
+        .filter((item) => item.rowIndex + 1 >= TIME_SLOT_DETECT_START_ROW_NUMBER)
+        .filter((item) => item.cell && normalizeCell(item.cell.value));
+      const allUAllDay = uCells.length > 0 && uCells.every((item) => normalizeCell(item.cell.value) === "全天");
+      const yellowUCells = uCells.filter((item) => item.cell.yellow);
+      const specificUCells = uCells.filter((item) => normalizeCell(item.cell.value) !== "全天");
+      const hasSpecificTimeSlot = specificUCells.length > 0;
+      const removedRows = new Set();
+      const timeSlotMessages = [];
+
+      if (allUAllDay && !yellowUCells.length) {
+        markTimeSlotRowsForRemoval(rows, removedRows);
+        timeSlotMessages.push("未检测到时段定向");
+        notices.push(`第14行起${timeSlotField}非空值均为“全天”且未标黄，预览中已删除时间段行。`);
+      } else if (allUAllDay && yellowUCells.length) {
+        markTimeSlotRowsForRemoval(rows, removedRows);
+        timeSlotMessages.push("未检测到时段定向，检测到时间段调整");
+        notices.push(`第14行起${timeSlotField}非空值均为“全天”且存在标黄，预览中已删除时间段行，并生成时间段调整提示。`);
+      } else if (hasSpecificTimeSlot) {
+        markTimeSlotRowsForRemoval(rows, removedRows);
+        const yellowSpecific = specificUCells.filter((item) => item.cell.yellow);
+        const normalSpecific = specificUCells.filter((item) => !item.cell.yellow);
+        if (normalSpecific.length) timeSlotMessages.push("有时间段定向、无时间段调整");
+        if (yellowSpecific.length) timeSlotMessages.push("有时间段定向、检测到时间段调整");
+        notices.push(yellowSpecific.length
+          ? `第14行起${timeSlotField}存在具体时间段且存在标黄，预览中已删除时间段行，并生成时间段调整提示。`
+          : `第14行起${timeSlotField}存在具体时间段且未标黄，预览中已删除时间段行。`);
+      } else {
+        timeSlotMessages.push("未检测到可判断的时段数据");
+        notices.push(`${timeSlotField}未检测到非空时段数据，未执行时间段行删除。`);
+      }
+
+      const visibleRowIndexes = rows
+        .map((_, index) => index)
+        .filter((index) => !removedRows.has(index));
+      const visibleColIndexes = Array.from(
+        { length: Math.max(...rows.map((row) => row.length), 1) },
+        (_, index) => index
+      ).filter((index) => !hiddenCols.has(index));
+
+      const limitedRowIndexes = visibleRowIndexes.slice(0, PREVIEW_ROW_LIMIT);
+      const limitedColIndexes = visibleColIndexes.slice(0, PREVIEW_COL_LIMIT);
+      if (visibleRowIndexes.length > limitedRowIndexes.length || visibleColIndexes.length > limitedColIndexes.length) {
+        notices.push(`为避免页面卡顿，默认预览显示 ${limitedRowIndexes.length}/${visibleRowIndexes.length} 行、${limitedColIndexes.length}/${visibleColIndexes.length} 列；检测仍扫描完整表格。点击结果或字段明细中的具体行，可在预览中定位显示该行。`);
+      }
+
+      return {
+        hiddenCols: Array.from(hiddenCols),
+        removedRows: Array.from(removedRows),
+        rowIndexes: limitedRowIndexes,
+        visibleRowIndexes,
+        colIndexes: limitedColIndexes,
+        fullVisibleRows: visibleRowIndexes.length,
+        fullVisibleCols: visibleColIndexes.length,
+        timeSlotMessages,
+        notices
+      };
+    }
+
+    function markTimeSlotRowsForRemoval(rows, removedRows) {
+      rows.forEach((_, rowIndex) => {
+        if (isTimeSlotDetailRow(rowIndex)) {
+          removedRows.add(rowIndex);
+        }
+      });
+    }
+
+    function isTimeSlotDetailRow(rowIndex) {
+      const rowNumber = rowIndex + 1;
+      return rowNumber >= TIME_SLOT_START_ROW_NUMBER && rowNumber % 2 === 1;
+    }
+
+    function syncCombinedText() {
+      state.combinedText = state.files.map((file) => `【${file.source}｜${file.name}】\n${file.text}`).join("\n\n");
+    }
+
+    function renderFiles() {
+      if (!state.files.length) {
+        fileList.innerHTML = "<div class=\"hint\">暂无文件</div>";
+        contentPreview.innerHTML = "<div class=\"empty-state\">上传文件后显示完整内容。</div>";
+        state.previewTables = [];
+        return;
+      }
+
+      fileList.innerHTML = state.files.map((file) => `
+        <div class="file-item">
+          <div class="file-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
+          <div class="file-meta">${escapeHtml(getExtension(file.name).toUpperCase())} · ${formatBytes(file.size)}</div>
+        </div>
+      `).join("");
+
+      state.previewTables = [];
+      contentPreview.innerHTML = state.files.map(renderFilePreview).join("");
+      initResizableColumns();
+      applyFreeze();
+    }
+
+    function renderFilePreview(file, fileIndex) {
+      const tableHtml = file.tables.length
+        ? file.tables.map((table, tableIndex) => renderPreviewTable(table, `${fileIndex}-${tableIndex}`, file.name)).join("")
+        : `<pre class="preview-text">${escapeHtml(file.text || "文件已读取，但未识别出文本内容。")}</pre>`;
+
+      return `
+        <section class="file-preview-block">
+          <h3 class="file-preview-title">${escapeHtml(file.name)}</h3>
+          ${tableHtml}
+        </section>
+      `;
+    }
+
+    function renderPreviewTable(table, tableId, fileName) {
+      const rows = table.rows.length ? table.rows : [[""]];
+      const preprocess = table.preprocess || preprocessTable(table);
+      const rowIndexes = getPreviewRowIndexes(table, preprocess, fileName);
+      const colIndexes = getPreviewColIndexes(table, preprocess, fileName);
+      state.previewTables.push(tableId);
+      const colgroup = colIndexes.map((sourceColIndex) => `<col style="width: ${defaultColumnWidth(sourceColIndex)}px;">`).join("");
+      const headerCells = colIndexes.map((sourceColIndex, displayColIndex) => `<th data-col="${displayColIndex}" title="${escapeHtml(columnName(sourceColIndex))}">${escapeHtml(columnName(sourceColIndex))}<span class="resize-handle" data-col="${displayColIndex}"></span></th>`).join("");
+      const bodyRows = rowIndexes.map((sourceRowIndex) => {
+        const row = rows[sourceRowIndex] || [];
+        const cells = colIndexes.map((sourceColIndex) => {
+          const meta = table.cells && table.cells[sourceRowIndex] ? table.cells[sourceRowIndex][sourceColIndex] : null;
+          const yellowClass = meta && meta.yellow ? " yellow-cell" : "";
+          const focusCellClass = isFocusedPreviewCell(fileName, table.name, sourceRowIndex + 1, sourceColIndex) ? " focused-preview-cell" : "";
+          return `<td class="${yellowClass}${focusCellClass}" data-row="${sourceRowIndex}" data-col="${sourceColIndex}" title="${escapeHtml(row[sourceColIndex])}">${escapeHtml(row[sourceColIndex])}</td>`;
+        }).join("");
+        const focusedClass = isFocusedPreviewRow(fileName, table.name, sourceRowIndex + 1) ? " class=\"focused-preview-row\"" : "";
+        return `<tr${focusedClass}>${cells}</tr>`;
+      }).join("");
+      const noteHtml = `
+        <div class="preprocess-note">
+          ${preprocess.notices.map((notice) => `<div>${escapeHtml(notice)}</div>`).join("")}
+        </div>
+        ${preprocess.timeSlotMessages.map((message) => `<div class="time-slot-result">${escapeHtml(message)}</div>`).join("")}
+      `;
+
+      return `
+        <p class="hint">${escapeHtml(table.name)}</p>
+        ${noteHtml}
+        <table class="preview-table" data-table-id="${tableId}" data-preview-file="${escapeHtml(fileName)}" data-preview-sheet="${escapeHtml(table.name)}">
+          <colgroup>${colgroup}</colgroup>
+          <thead><tr>${headerCells}</tr></thead>
+          <tbody>${bodyRows}</tbody>
+        </table>
+      `;
+    }
+
+    function getPreviewRowIndexes(table, preprocess, fileName) {
+      const rows = table.rows || [];
+      const visibleRowIndexes = preprocess.visibleRowIndexes && preprocess.visibleRowIndexes.length
+        ? preprocess.visibleRowIndexes
+        : rows.map((_, index) => index);
+      const selectedRowNumber = state.previewFocus
+        && state.previewFocus.file === fileName
+        && state.previewFocus.sheet === table.name
+        ? Number(state.previewFocus.rowNumber)
+        : 0;
+      const selectedRowIndex = selectedRowNumber > 0 ? selectedRowNumber - 1 : -1;
+      const picked = new Set(visibleRowIndexes.slice(0, PREVIEW_ROW_LIMIT));
+
+      if (selectedRowIndex >= 0) {
+        for (let index = 0; index < Math.min(13, rows.length); index += 1) {
+          if (visibleRowIndexes.includes(index)) picked.add(index);
+        }
+        [selectedRowIndex - 1, selectedRowIndex, selectedRowIndex + 1].forEach((index) => {
+          if (index >= 0 && index < rows.length) picked.add(index);
+        });
+      }
+
+      return Array.from(picked).sort((a, b) => a - b);
+    }
+
+    function getPreviewColIndexes(table, preprocess, fileName) {
+      const rows = table.rows || [];
+      const maxCols = Math.max(...rows.map((row) => row.length), 1);
+      const baseColIndexes = preprocess.colIndexes && preprocess.colIndexes.length
+        ? preprocess.colIndexes
+        : Array.from({ length: maxCols }, (_, index) => index).slice(0, PREVIEW_COL_LIMIT);
+      const picked = new Set(baseColIndexes);
+      if (state.previewFocus
+        && state.previewFocus.file === fileName
+        && state.previewFocus.sheet === table.name
+        && Array.isArray(state.previewFocus.colIndexes)) {
+        state.previewFocus.colIndexes.forEach((index) => {
+          if (index >= 0 && index < maxCols) picked.add(index);
+        });
+      }
+      return Array.from(picked).sort((a, b) => a - b);
+    }
+
+    function isFocusedPreviewRow(fileName, sheetName, rowNumber) {
+      return Boolean(state.previewFocus
+        && state.previewFocus.file === fileName
+        && state.previewFocus.sheet === sheetName
+        && Number(state.previewFocus.rowNumber) === Number(rowNumber));
+    }
+
+    function isFocusedPreviewCell(fileName, sheetName, rowNumber, colIndex) {
+      return Boolean(isFocusedPreviewRow(fileName, sheetName, rowNumber)
+        && Array.isArray(state.previewFocus.colIndexes)
+        && state.previewFocus.colIndexes.includes(colIndex));
+    }
+
+    function defaultColumnWidth(index) {
+      if (index === COL_AJ || index === COL_BW || index === COL_CA) return 220;
+      if (index < 4) return 160;
+      return 128;
+    }
+
+    function initResizableColumns() {
+      document.querySelectorAll(".resize-handle").forEach((handle) => {
+        handle.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+          const table = handle.closest("table");
+          const colIndex = Number(handle.dataset.col);
+          const col = table.querySelectorAll("col")[colIndex];
+          const startX = event.clientX;
+          const startWidth = parseFloat(col.style.width) || 128;
+
+          function onMove(moveEvent) {
+            const nextWidth = Math.max(64, startWidth + moveEvent.clientX - startX);
+            col.style.width = `${nextWidth}px`;
+            applyFreeze();
+          }
+
+          function onUp() {
+            document.removeEventListener("mousemove", onMove);
+            document.removeEventListener("mouseup", onUp);
+          }
+
+          document.addEventListener("mousemove", onMove);
+          document.addEventListener("mouseup", onUp);
+        });
+      });
+    }
+
+    function applyFreeze() {
+      const freezeRows = Math.max(0, Number(freezeRowsInput.value) || 0);
+      const freezeCols = Math.max(0, Number(freezeColsInput.value) || 0);
+
+      document.querySelectorAll(".preview-table").forEach((table) => {
+        const colWidths = Array.from(table.querySelectorAll("col")).map((col) => parseFloat(col.style.width) || 128);
+        const lefts = colWidths.map((_, index) => colWidths.slice(0, index).reduce((sum, width) => sum + width, 0));
+        table.querySelectorAll("th, td").forEach((cell) => {
+          cell.classList.remove("sticky-col");
+          cell.classList.remove("sticky-row");
+          cell.style.left = "";
+          cell.style.top = "";
+        });
+
+        table.querySelectorAll("thead th").forEach((cell) => {
+          cell.style.top = "0px";
+        });
+
+        Array.from(table.querySelectorAll("tbody tr")).forEach((row, rowIndex) => {
+          if (rowIndex < freezeRows) {
+            Array.from(row.children).forEach((cell) => {
+              cell.classList.add("sticky-row");
+              cell.style.top = `${38 + rowIndex * 38}px`;
+            });
+          }
+        });
+
+        if (freezeCols > 0) {
+          table.querySelectorAll("tr").forEach((row) => {
+            Array.from(row.children).forEach((cell, colIndex) => {
+              if (colIndex < freezeCols) {
+                cell.classList.add("sticky-col");
+                cell.style.left = `${lefts[colIndex]}px`;
+              }
+            });
+          });
+        }
+      });
+    }
+
+    function handleReferenceInput() {
+      state.referenceRows = parseReferenceTable(referenceTableText.value);
+      renderProgramPreview();
+      updateReadyState();
+    }
+
+    function parseReferenceTable(text) {
+      const rows = text
+        .replace(/\u00a0/g, " ")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map(splitTableLine)
+        .filter((cells) => cells.length >= 1);
+
+      return rows
+        .filter((cells, index) => {
+          const program = extractReferenceProgram(cells);
+          return index !== 0 || !["节目", "劇集", "剧集"].includes(program);
+        })
+        .map((cells, index) => ({
+          sequence: normalizeCell(cells[0]) || String(index + 1),
+          program: extractReferenceProgram(cells),
+          qipuId: normalizeCell(cells[2]),
+          updateTime: normalizeCell(cells[3])
+        }))
+        .filter((row) => row.program);
+    }
+
+    function splitTableLine(line) {
+      if (line.includes("\t")) return line.split("\t");
+      if (line.includes(",")) return line.split(",");
+      return line.split(/\s+/);
+    }
+
+    function extractReferenceProgram(cells) {
+      if (cells.length === 1) return normalizeReferenceProgram(cells[0]);
+      return normalizeReferenceProgram(cells[1]);
+    }
+
+    function normalizeReferenceProgram(value) {
+      return normalizeCell(value).replace(/^\*+|\*+$/g, "").trim();
+    }
+
+    function normalizeCell(value) {
+      return String(value ?? "").replace(/^"|"$/g, "").trim();
+    }
+
+    function renderProgramPreview() {
+      if (!state.referenceRows.length) {
+        programPreview.textContent = "粘贴四列表格后，将在这里显示第二列“节目”的剧名。";
+        return;
+      }
+
+      programPreview.textContent = state.referenceRows.map((row) => row.program).join("\n");
+    }
+
+    function runCheck() {
+      setStatus(state.activeTool === "brand" ? "正在核对" : state.activeTool === "settlement" ? "正在识别实际结算" : "正在识别修改字段", "warn");
+      runCheckBtn.disabled = true;
+      const checked = state.activeTool === "brand"
+        ? runWorkbookRules()
+        : state.activeTool === "settlement"
+          ? runSettlementAudit()
+          : runAdjustmentDetection();
+      state.results = checked.results;
+      state.abnormalFields = checked.abnormalFields;
+      state.unmodifiedBrandItems = checked.unmodifiedBrandItems || [];
+      state.adjustmentScenario = checked.adjustmentScenario || null;
+      state.adjustmentVolumeRatios = checked.adjustmentVolumeRatios || null;
+      state.settlementSummary = checked.settlementSummary || null;
+      state.stats = checked.stats;
+      resetAbnormalColumnFilters();
+      renderResults();
+      renderAbnormalFields();
+      renderToolNotice();
+      renderBrandSummary();
+      renderAdjustmentScenarioPreview();
+      setStatus(state.activeTool === "brand" ? "核对完成" : state.activeTool === "settlement" ? "实际结算识别完成" : "识别完成", getCompletionStatusTone(checked));
+      updateReadyState();
+      exportBtn.disabled = !(state.results.length || state.abnormalFields.length);
+      lastRunText.textContent = new Date().toLocaleString("zh-CN");
+    }
+
+    function runWorkbookRules() {
+      const expectedPrograms = state.referenceRows.map((row) => row.program).filter(Boolean);
+      const results = [];
+      const abnormalFields = [];
+      const unmodifiedBrandItems = [];
+      const stats = {
+        scannedRows: 0,
+        pdbRows: 0,
+        abnormalFields: 0,
+        abnormalRows: 0
+      };
+
+      state.files.forEach((file) => {
+        file.tables.forEach((table) => {
+          const orderNameCol = findOrderNameColumn(table);
+          const orderIdCol = findOrderIdColumn(table);
+          const fieldRow = getFieldRow(table);
+          const dField = fieldLabel(fieldRow, COL_D);
+          const ajField = fieldLabel(fieldRow, COL_AJ);
+          const preprocess = table.preprocess || preprocessTable(table);
+
+          (preprocess.timeSlotMessages || []).forEach((message) => {
+            results.push({
+              file: file.name,
+              sheet: table.name,
+              rowNumber: "-",
+              orderName: "-",
+              rule: "补充规则：时段检测与预处理",
+              status: message.includes("检测到时间段调整") ? "warn" : "ok",
+              abnormalField: "",
+              value: "",
+              message
+            });
+          });
+
+          table.rows.forEach((row, rowIndex) => {
+            if (isTimeSlotDetailRow(rowIndex)) return;
+            stats.scannedRows += 1;
+            const cells = table.cells[rowIndex] || [];
+            const orderName = normalizeCell(row[orderNameCol]) || `第 ${rowIndex + 1} 行`;
+            const orderId = normalizeCell(row[orderIdCol]);
+            const dValue = normalizeCell(row[COL_D]);
+            const ajCell = cells[COL_AJ];
+            const ajValue = normalizeCell(row[COL_AJ]);
+            const fullYellowRow = rowIndex + 1 >= TIME_SLOT_DETECT_START_ROW_NUMBER && isFullyYellowRow(row, cells);
+
+            if (fullYellowRow) {
+              results.push({
+                file: file.name,
+                sheet: table.name,
+                rowNumber: rowIndex + 1,
+                previewFile: file.name,
+                previewSheet: table.name,
+                previewRowNumber: rowIndex + 1,
+                orderName,
+                orderId,
+                rule: "新增订单项检测",
+                status: "bad",
+                abnormalField: "整行标黄",
+                value: "",
+                message: "此行为新增订单项，请人工核对绿排期"
+              });
+              abnormalFields.push({
+                file: file.name,
+                sheet: table.name,
+                rowNumber: rowIndex + 1,
+                previewFile: file.name,
+                previewSheet: table.name,
+                previewRowNumber: rowIndex + 1,
+                orderName,
+                orderId,
+                field: "整行标黄",
+                address: `${rowIndex + 1}行`,
+                value: "",
+                message: "此行为新增订单项，请人工核对绿排期",
+                isNewOrderRow: true
+              });
+              return;
+            }
+
+            if (is15sBrandMomentRow(row)) {
+              stats.pdbRows += 1;
+              const listCheck = compareReverseProgramList(ajValue, expectedPrograms);
+              const ajProblems = [];
+              if (!ajCell || !ajCell.yellow) {
+                ajProblems.push(`${ajField}未标黄`);
+                unmodifiedBrandItems.push({
+                  orderName,
+                  orderId,
+                  rowNumber: rowIndex + 1,
+                  period: summarizeSchedulePeriod(table, row)
+                });
+              }
+              if (!listCheck.ok) ajProblems.push(listCheck.message);
+              const status = ajProblems.length ? "bad" : "ok";
+              results.push({
+                file: file.name,
+                sheet: table.name,
+                rowNumber: rowIndex + 1,
+                previewFile: file.name,
+                previewSheet: table.name,
+                previewRowNumber: rowIndex + 1,
+                orderName,
+                rule: `规则1：${dField}为品牌时刻且广告时长为15s时检查${ajField}标黄和反向剧集清单`,
+                status,
+                abnormalField: ajProblems.length ? ajField : "",
+                value: ajValue,
+                message: ajProblems.length ? ajProblems.join("；") : `${ajField}标黄且反定向剧单完全一致。`
+              });
+              if (ajProblems.length) {
+                abnormalFields.push({
+                  file: file.name,
+                  sheet: table.name,
+                  rowNumber: rowIndex + 1,
+                  previewFile: file.name,
+                  previewSheet: table.name,
+                  previewRowNumber: rowIndex + 1,
+                  orderName,
+                  orderId,
+                  field: ajField,
+                  address: `AJ${rowIndex + 1}`,
+                  value: ajValue,
+                  message: ajProblems.join("；")
+                });
+              }
+            }
+
+            cells.forEach((cell, colIndex) => {
+              if (!cell || !cell.yellow) return;
+              if (shouldIgnoreYellowCell(colIndex, cell, row, fieldRow)) return;
+
+              abnormalFields.push({
+                file: file.name,
+                sheet: table.name,
+                rowNumber: rowIndex + 1,
+                previewFile: file.name,
+                previewSheet: table.name,
+                previewRowNumber: rowIndex + 1,
+                orderName,
+                orderId,
+                colIndex,
+                sourceTable: table,
+                sourceRow: row,
+                isReplenishment: isReplenishmentOrderRow(row),
+                field: fieldLabel(fieldRow, colIndex),
+                address: `${columnName(colIndex)}${rowIndex + 1}`,
+                value: cell.value,
+                message: "发现异常标黄"
+              });
+            });
+          });
+        });
+      });
+
+      const groupedAbnormalFields = groupAbnormalFieldsByRow(abnormalFields);
+
+      if (groupedAbnormalFields.length) {
+        results.push({
+          file: "全部文件",
+          sheet: "-",
+          rowNumber: "-",
+          orderName: "-",
+          rule: "规则2：异常标黄字段检测",
+          status: "bad",
+          abnormalField: `${groupedAbnormalFields.length} 行异常`,
+          value: "",
+          message: "已在“异常字段”区域列出异常行的订单项名称和异常字段。"
+        });
+      } else {
+        results.push({
+          file: "全部文件",
+          sheet: "-",
+          rowNumber: "-",
+          orderName: "-",
+          rule: "规则2：异常标黄字段检测",
+          status: "ok",
+          abnormalField: "",
+          value: "",
+          message: "未发现需展示的异常标黄字段。"
+        });
+      }
+
+      if (!results.length) {
+        results.push({
+          file: "全部文件",
+          sheet: "-",
+          rowNumber: "-",
+          orderName: "-",
+          rule: "核对前置条件",
+          status: "warn",
+          abnormalField: "",
+          value: "",
+          message: "未找到可核对的工作表数据。"
+        });
+      }
+
+      stats.abnormalFields = groupedAbnormalFields.length;
+      stats.abnormalRows = groupedAbnormalFields.length;
+
+      return { results, abnormalFields: groupedAbnormalFields, unmodifiedBrandItems, stats };
+    }
+
+    function runAdjustmentDetection() {
+      const results = [];
+      const collected = collectAdjustmentFieldsFromRecords(getAllTableRecords());
+      const adjustmentFields = collected.fields;
+      const stats = collected.stats;
+
+      const adjustmentVolumeRatios = adjustmentFields.some(isBookedAmountField)
+        ? calculateOrderVolumeRatios(getUploadedGreenScheduleTables())
+        : null;
+      const adjustmentScenario = detectAdjustmentScenario(adjustmentFields);
+      const groupedAdjustmentFields = groupAbnormalFieldsByRow(adjustmentFields);
+      if (groupedAdjustmentFields.length) {
+        if (adjustmentScenario) {
+          results.push({
+            file: "全部文件",
+            sheet: "-",
+            rowNumber: "-",
+            orderName: "-",
+            rule: "检测到改单场景",
+            status: adjustmentScenario.severity || "ok",
+            abnormalField: adjustmentScenario.changedFieldLabel,
+            value: "",
+            message: adjustmentScenario.message
+          });
+        }
+        results.push({
+          file: "全部文件",
+          sheet: "-",
+          rowNumber: "-",
+          orderName: "-",
+          rule: "调整字段检测",
+          status: "ok",
+          abnormalField: `${groupedAdjustmentFields.length} 行调整`,
+          value: "",
+          message: "已在“调整字段检测”区域列出有调整的订单项、调整字段和字段赋值。"
+        });
+      } else {
+        results.push({
+          file: "全部文件",
+          sheet: "-",
+          rowNumber: "-",
+          orderName: "-",
+          rule: "调整字段检测",
+          status: "bad",
+          abnormalField: "",
+          value: "",
+          message: "绿排期无修改",
+          noChange: true
+        });
+      }
+
+      stats.pdbRows = groupedAdjustmentFields.length;
+      stats.abnormalFields = groupedAdjustmentFields.length;
+      stats.abnormalRows = groupedAdjustmentFields.length;
+      return { results, abnormalFields: groupedAdjustmentFields, unmodifiedBrandItems: [], adjustmentScenario, adjustmentVolumeRatios, stats };
+    }
+
+    function runSettlementAudit() {
+      const records = getAllTableRecords();
+      if (!records.length) {
+        const settlement = buildSettlementEmailOnlySummary();
+        const stats = {
+          scannedRows: 0,
+          pdbRows: 0,
+          abnormalFields: 1,
+          abnormalRows: 0
+        };
+        return {
+          results: [{
+            file: "全部文件",
+            sheet: "-",
+            rowNumber: "-",
+            orderName: "-",
+            rule: "实际结算",
+            status: settlement.status,
+            abnormalField: "邮件附件解析",
+            value: "",
+            message: settlement.message,
+            settlementSummary: true
+          }],
+          abnormalFields: [],
+          unmodifiedBrandItems: [],
+          adjustmentScenario: null,
+          adjustmentVolumeRatios: null,
+          settlementSummary: settlement,
+          stats
+        };
+      }
+      const classified = classifySettlementRecords(records);
+      const greenRecords = classified.green.length ? classified.green : records;
+      const collected = collectAdjustmentFieldsFromRecords(greenRecords);
+      const adjustmentFields = collected.fields;
+      const groupedAdjustmentFields = groupAbnormalFieldsByRow(adjustmentFields);
+      const netPriceYellowFields = adjustmentFields.filter(isNetUnitPriceFieldItem);
+      const settlement = buildSettlementSummary(classified, netPriceYellowFields);
+      const stats = {
+        scannedRows: collected.stats.scannedRows,
+        pdbRows: [classified.client[0], classified.execution[0], classified.green[0]].filter(Boolean).length,
+        abnormalFields: settlement.status === "ok" ? 0 : 1,
+        abnormalRows: groupedAdjustmentFields.length
+      };
+
+      const results = [{
+        file: "全部文件",
+        sheet: "-",
+        rowNumber: "-",
+        orderName: "-",
+        rule: "实际结算",
+        status: settlement.status,
+        abnormalField: settlement.status === "bad" ? "实际结算核对" : "",
+        value: "",
+        message: settlement.message,
+        settlementSummary: true
+      }];
+
+      if (groupedAdjustmentFields.length) {
+        results.push({
+          file: "全部文件",
+          sheet: "-",
+          rowNumber: "-",
+          orderName: "-",
+          rule: "调整字段检测",
+          status: "ok",
+          abnormalField: `${groupedAdjustmentFields.length} 行调整`,
+          value: "",
+          message: "已在“调整字段检测”区域列出有调整的订单项、调整字段和字段赋值。"
+        });
+      }
+
+      return {
+        results,
+        abnormalFields: groupedAdjustmentFields,
+        unmodifiedBrandItems: [],
+        adjustmentScenario: null,
+        adjustmentVolumeRatios: null,
+        settlementSummary: settlement,
+        stats
+      };
+    }
+
+    function buildSettlementEmailOnlySummary() {
+      const hasEmailFile = state.files.some((file) => ["msg", "eml"].includes(getExtension(file.name)));
+      return {
+        status: "bad",
+        message: hasEmailFile
+          ? "实际结算机审不通过。\n当前静态网页无法直接拆解邮件附件，请同时上传客户排期、执行排期、绿排期三个排期文件。"
+          : "实际结算机审不通过。\n未读取到可核对的排期表格，请上传客户排期、执行排期、绿排期。"
+      };
+    }
+
+    function getAllTableRecords() {
+      return state.files.flatMap((file) => (file.tables || []).map((table) => ({ file, table })));
+    }
+
+    function classifySettlementRecords(records) {
+      return records.reduce((groups, record) => {
+        const role = classifySettlementRecord(record);
+        if (role) groups[role].push(record);
+        return groups;
+      }, { client: [], execution: [], green: [], unknown: [] });
+    }
+
+    function classifySettlementRecord(record) {
+      const text = flattenTableText(record.table).toLowerCase();
+      const fileName = normalizeCell(record.file.name).toLowerCase();
+      const compactText = normalizeForList(text).toLowerCase();
+      const compactName = normalizeForList(fileName).toLowerCase();
+      if ((text.includes("orderitem id") || text.includes("订单项id")) && (text.includes("折后单价") || text.includes("unit price after discount"))) return "green";
+      if ((compactText.includes("orderitemid") || text.includes("订单项id")) && (compactText.includes("unitpriceafterdiscount") || text.includes("折后单价"))) return "green";
+      if ((text.includes("购买数量") || text.includes("purchased quantity") || compactText.includes("contractamount")) && (text.includes("购买总价") || text.includes("purchased total") || compactText.includes("totalnetprice")) && (text.includes("periods") || text.includes("投放周期") || fileName.includes("执行"))) return "execution";
+      if (compactText.includes("costperbuying") && compactText.includes("totalpackagenet") && compactText.includes("count")) return "client";
+      if ((compactText.includes("quantity") || compactText.includes("count") || text.includes("数量")) && (compactText.includes("totalnetcost") || compactText.includes("totalpackagenet") || compactText.includes("totalnetprice") || compactText.includes("nettotal") || compactText.includes("paidtotal") || compactText.includes("payableamount") || text.includes("净价") || text.includes("净额"))) return "client";
+      if (fileName.includes("绿排期") || fileName.includes("订单排期")) return "green";
+      if (fileName.includes("执行")) return "execution";
+      if (compactName.includes("tom") || (fileName.includes("实结") && !fileName.includes("执行") && !fileName.includes("订单排期"))) return "client";
+      if (fileName.includes("客户") || fileName.includes("client")) return "client";
+      return "unknown";
+    }
+
+    function flattenTableText(table) {
+      return (table.rows || []).map((row) => row.map(normalizeCell).join(" ")).join("\n");
+    }
+
+    function buildSettlementSummary(classified, netPriceYellowFields) {
+      const client = extractSettlementControls(classified.client[0], "客户排期");
+      const execution = extractSettlementControls(classified.execution[0], "执行排期");
+      const green = extractSettlementControls(classified.green[0], "绿排期");
+      const schedules = [client, execution, green];
+      const infoOk = schedules.every((item) => item.record && item.quantity != null && item.amount != null && item.period)
+        && valuesSame(schedules.map((item) => item.quantity))
+        && amountsSame(schedules.map((item) => item.amount))
+        && valuesSame(schedules.map((item) => item.period));
+      const executionConsistency = getExecutionPeriodConsistency(execution);
+      const period = firstValue([client.period, execution.period, green.period, execution.detailPeriod, execution.headerPeriod, execution.filePeriod]);
+      const amount = firstValue([client.amount, execution.amount, green.amount]);
+      const baseLine = `实际结算：整单周期${period || "待人工确认"}，整单金额${amount != null ? formatCurrency(amount) : "待人工确认"}`;
+      const netPriceLine = netPriceYellowFields.length ? "净单价变化，请人工复核" : "";
+
+      if (netPriceLine) {
+        return {
+          status: "bad",
+          message: [netPriceLine, baseLine, buildScheduleValuesLine(schedules)].filter(Boolean).join("\n")
+        };
+      }
+
+      if (!infoOk) {
+        return {
+          status: "bad",
+          message: ["实际结算机审不通过。", buildScheduleValuesLine(schedules)].filter(Boolean).join("\n")
+        };
+      }
+
+      if (!executionConsistency.ok) {
+        return {
+          status: "warn",
+          message: [baseLine, executionConsistency.message].filter(Boolean).join("\n")
+        };
+      }
+
+      return {
+        status: "ok",
+        message: baseLine
+      };
+    }
+
+    function extractSettlementControls(record, label) {
+      const result = {
+        label,
+        record,
+        quantity: null,
+        amount: null,
+        period: "",
+        detailPeriod: "",
+        headerPeriod: "",
+        filePeriod: ""
+      };
+      if (!record) return result;
+
+      const table = record.table;
+      const headerRowIndex = findBestHeaderRow(table);
+      const header = getCombinedHeader(table, headerRowIndex);
+      const isClient = label === "客户排期";
+      const quantityCandidates = isClient
+        ? ["count", "paid quantity", "purchased quantity", "quantity", "qty", "购买数量", "购买总量", "总数量", "数量", "contract amount"]
+        : ["contract amount", "购买数量", "purchased quantity", "quantity", "amount", "数量"];
+      const amountCandidates = isClient
+        ? ["total package net", "total net cost", "total net price", "net total", "paid total", "payable amount", "折后净总价", "总净价", "净总价", "实付总金额", "实结金额", "投放金额", "购买总价", "折后总价", "合同金额", "净额", "金额"]
+        : ["total price after discount", "total net price", "购买总价", "total net cost", "purchased total", "total cost", "net payable", "actual paid", "折后总价", "金额", "净额"];
+      const quantityCol = findHeaderColumn(header, quantityCandidates);
+      const amountCol = findHeaderColumn(header, amountCandidates);
+      if (quantityCol >= 0) result.quantity = readTotalOrSum(table, headerRowIndex, quantityCol);
+      if (amountCol >= 0) result.amount = readTotalOrSum(table, headerRowIndex, amountCol);
+      result.detailPeriod = getSettlementDetailedSchedulePeriod(table, headerRowIndex);
+      result.headerPeriod = findHeaderPeriodInTable(table);
+      result.filePeriod = findPeriodInText(record.file.name);
+      result.period = firstValue([result.detailPeriod, result.headerPeriod, result.filePeriod]);
+      return result;
+    }
+
+    function findBestHeaderRow(table) {
+      const rows = table.rows || [];
+      let best = 0;
+      let bestScore = -1;
+      rows.forEach((row, index) => {
+        const text = row.map(normalizeCell).join(" ").toLowerCase();
+        const score = [
+          "购买数量", "购买总价", "orderitem id", "折后单价", "quantity", "count", "contract amount",
+          "total net cost", "total package net", "total net price", "total price after discount", "cost per buying", "periods"
+        ].reduce((sum, token) => sum + (text.includes(token.toLowerCase()) ? 1 : 0), 0);
+        if (score > bestScore) {
+          best = index;
+          bestScore = score;
+        }
+      });
+      return best;
+    }
+
+    function getCombinedHeader(table, headerRowIndex) {
+      const rows = table.rows || [];
+      const maxCols = Math.max(...rows.map((row) => row.length), 1);
+      const indexes = Array.from(new Set([
+        headerRowIndex - 1,
+        headerRowIndex,
+        headerRowIndex + 1,
+        headerRowIndex + 2
+      ].filter((index) => index >= 0 && index < rows.length)));
+      return Array.from({ length: maxCols }, (_, colIndex) => indexes
+        .map((rowIndex) => normalizeCell(rows[rowIndex] && rows[rowIndex][colIndex]))
+        .filter(Boolean)
+        .join(" "));
+    }
+
+    function findHeaderColumn(header, candidates) {
+      const normalizedHeader = (header || []).map((cell) => normalizeForList(cell).toLowerCase());
+      const normalizedCandidates = candidates.map((candidate) => normalizeForList(candidate).toLowerCase()).filter(Boolean);
+      for (const candidate of normalizedCandidates) {
+        const exactIndex = normalizedHeader.findIndex((text) => text === candidate);
+        if (exactIndex >= 0) return exactIndex;
+      }
+      for (const candidate of normalizedCandidates) {
+        const containsIndex = normalizedHeader.findIndex((text) => text.includes(candidate));
+        if (containsIndex >= 0) return containsIndex;
+      }
+      return -1;
+    }
+
+    function readTotalOrSum(table, headerRowIndex, colIndex) {
+      const rows = table.rows || [];
+      const dataRows = rows.slice(Math.max(headerRowIndex + 1, 0));
+      const totalRow = dataRows.find((row) => row.some((cell) => /总计|合计|小计|subtotal|sub total|grand total|total/i.test(normalizeCell(cell))));
+      if (totalRow) {
+        const total = parseStrictAmount(totalRow[colIndex]);
+        if (total != null) return total;
+      }
+      const values = dataRows
+        .map((row) => parseStrictAmount(row[colIndex]))
+        .filter((value) => value != null);
+      if (!values.length) return null;
+      return values.reduce((sum, value) => sum + value, 0);
+    }
+
+    function parseStrictAmount(value) {
+      const rawText = normalizeCell(value);
+      if (!rawText || rawText.trim().startsWith("=")) return null;
+      const text = rawText.replace(/[,\s￥¥元]/g, "");
+      if (!text || text === "--") return null;
+      const match = text.match(/-?\d+(?:\.\d+)?/);
+      if (!match) return null;
+      const number = Number(match[0]);
+      return Number.isFinite(number) ? number : null;
+    }
+
+    function getDetailedSchedulePeriod(table) {
+      const rowIndexes = [];
+      (table.rows || []).forEach((row, rowIndex) => {
+        if (rowIndex < TIME_SLOT_DETECT_START_ROW_NUMBER - 1 || isTimeSlotDetailRow(rowIndex)) return;
+        rowIndexes.push(rowIndex);
+      });
+      const dateItems = [];
+      rowIndexes.forEach((rowIndex) => {
+        const row = table.rows[rowIndex] || [];
+        for (let colIndex = SCHEDULE_START_COL; colIndex < row.length; colIndex += 1) {
+          if (!isSchedulePoint(row[colIndex])) continue;
+          const item = getScheduleDateInfoForColumn(table, colIndex);
+          if (item) dateItems.push(item);
+        }
+      });
+      if (!dateItems.length) return "";
+      dateItems.sort((a, b) => a.date - b.date);
+      return formatScheduleDateRange(dateItems[0], dateItems[dateItems.length - 1]);
+    }
+
+    function getSettlementDetailedSchedulePeriod(table, headerRowIndex) {
+      const rows = table.rows || [];
+      if (!rows.length) return "";
+      const dateColumns = getFlexibleScheduleDateColumns(table);
+      if (!dateColumns.length) return getDetailedSchedulePeriod(table);
+      const maxDateHeaderRow = Math.max(...dateColumns.map((item) => item.headerRowIndex || 0));
+      const dataStartRow = Math.max(headerRowIndex + 1, maxDateHeaderRow + 1, TIME_SLOT_DETECT_START_ROW_NUMBER - 1);
+      const dateItems = [];
+      dateColumns.forEach((dateColumn) => {
+        for (let rowIndex = dataStartRow; rowIndex < rows.length; rowIndex += 1) {
+          if (isTimeSlotDetailRow(rowIndex)) continue;
+          const row = rows[rowIndex] || [];
+          if (!isSchedulePoint(row[dateColumn.colIndex])) continue;
+          dateItems.push(dateColumn);
+          break;
+        }
+      });
+      if (!dateItems.length) return getDetailedSchedulePeriod(table);
+      dateItems.sort((a, b) => a.date - b.date);
+      return formatScheduleDateRange(dateItems[0], dateItems[dateItems.length - 1]);
+    }
+
+    function getFlexibleScheduleDateColumns(table) {
+      const rows = table.rows || [];
+      const headerPeriod = findHeaderPeriodInTable(table);
+      const years = extractYearsFromPeriodText(headerPeriod || flattenTableText(table).slice(0, 800));
+      const maxCols = Math.max(...rows.map((row) => row.length), 1);
+      const dateColumns = [];
+      for (let colIndex = 0; colIndex < maxCols; colIndex += 1) {
+        const dateItem = getFlexibleDateInfoForColumn(rows, colIndex, years);
+        if (dateItem) dateColumns.push(dateItem);
+      }
+      return dateColumns;
+    }
+
+    function getFlexibleDateInfoForColumn(rows, colIndex, years) {
+      for (let rowIndex = 0; rowIndex < Math.min(15, rows.length); rowIndex += 1) {
+        const direct = parseSingleDate(normalizeCell(rows[rowIndex] && rows[rowIndex][colIndex]));
+        if (direct) return { ...direct, colIndex, headerRowIndex: rowIndex };
+      }
+      for (let monthRowIndex = 0; monthRowIndex < Math.min(15, rows.length); monthRowIndex += 1) {
+        let currentMonthInfo = null;
+        for (let index = 0; index <= colIndex; index += 1) {
+          currentMonthInfo = parseScheduleMonthFlexible(rows[monthRowIndex] && rows[monthRowIndex][index], years) || currentMonthInfo;
+        }
+        if (!currentMonthInfo) continue;
+        for (const dayOffset of [1, 2]) {
+          const dayRowIndex = monthRowIndex + dayOffset;
+          const day = parseInt(normalizeCell(rows[dayRowIndex] && rows[dayRowIndex][colIndex]), 10);
+          if (!Number.isFinite(day) || day < 1 || day > 31) continue;
+          const date = new Date(currentMonthInfo.year, currentMonthInfo.month - 1, day).getTime();
+          if (!Number.isFinite(date)) continue;
+          return {
+            text: `${currentMonthInfo.year}年${String(currentMonthInfo.month).padStart(2, "0")}月${String(day).padStart(2, "0")}日`,
+            date,
+            colIndex,
+            headerRowIndex: dayRowIndex
+          };
+        }
+      }
+      return null;
+    }
+
+    function parseSingleDate(text) {
+      const match = normalizeCell(text).match(/^(\d{4})[年\/.-](\d{1,2})[月\/.-](\d{1,2})日?$/);
+      if (!match) return null;
+      const year = Number(match[1]);
+      const month = Number(match[2]);
+      const day = Number(match[3]);
+      const date = new Date(year, month - 1, day).getTime();
+      if (!Number.isFinite(date)) return null;
+      return {
+        text: `${year}年${String(month).padStart(2, "0")}月${String(day).padStart(2, "0")}日`,
+        date
+      };
+    }
+
+    function extractYearsFromPeriodText(text) {
+      const years = [...normalizeCell(text).matchAll(/20\d{2}/g)].map((match) => Number(match[0]));
+      return years.length ? Array.from(new Set(years)) : [new Date().getFullYear()];
+    }
+
+    function parseScheduleMonthFlexible(value, years) {
+      const strict = parseScheduleMonth(value);
+      if (strict) return strict;
+      const text = normalizeCell(value);
+      const match = text.match(/^([A-Za-z]{3,9})\.?$/);
+      if (!match) return null;
+      const monthMap = {
+        jan: 1, january: 1,
+        feb: 2, february: 2,
+        mar: 3, march: 3,
+        apr: 4, april: 4,
+        may: 5,
+        jun: 6, june: 6,
+        jul: 7, july: 7,
+        aug: 8, august: 8,
+        sep: 9, sept: 9, september: 9,
+        oct: 10, october: 10,
+        nov: 11, november: 11,
+        dec: 12, december: 12
+      };
+      const month = monthMap[match[1].toLowerCase()];
+      if (!month) return null;
+      return { year: years[0], month };
+    }
+
+    function findHeaderPeriodInTable(table) {
+      const headerText = (table.rows || [])
+        .slice(0, 12)
+        .map((row) => row.slice(0, SCHEDULE_START_COL).map(normalizeCell).join(" "))
+        .join("\n");
+      return findPeriodInText(headerText);
+    }
+
+    function findPeriodInText(text) {
+      const value = normalizeCell(text);
+      const delimitedMatches = [...value.matchAll(/(\d{4})[年\/.-](\d{1,2})[月\/.-](\d{1,2})日?/g)];
+      const compactMatches = [...value.matchAll(/(20\d{2})(\d{2})(\d{2})/g)];
+      const matches = [...delimitedMatches, ...compactMatches]
+        .map((match) => ({
+          text: `${match[1]}年${String(Number(match[2])).padStart(2, "0")}月${String(Number(match[3])).padStart(2, "0")}日`,
+          date: new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])).getTime()
+        }))
+        .filter((item) => Number.isFinite(item.date));
+      if (!matches.length) return "";
+      matches.sort((a, b) => a.date - b.date);
+      return formatScheduleDateRange(matches[0], matches[matches.length - 1]);
+    }
+
+    function getExecutionPeriodConsistency(execution) {
+      const values = [
+        { label: "执行排期细排周期", value: execution.detailPeriod },
+        { label: "表头周期", value: execution.headerPeriod },
+        { label: "文件名称周期", value: execution.filePeriod }
+      ].filter((item) => item.value);
+      if (values.length < 2) return { ok: true, message: "" };
+      const uniqueValues = Array.from(new Set(values.map((item) => item.value)));
+      if (uniqueValues.length <= 1) return { ok: true, message: "" };
+      const grouped = uniqueValues.map((value) => {
+        const labels = values.filter((item) => item.value === value).map((item) => item.label);
+        return `${labels.join("和")}为${value}`;
+      });
+      return { ok: false, message: `${grouped.join("，")}，请人工复核` };
+    }
+
+    function buildScheduleValuesLine(schedules) {
+      return schedules.map((item) => (
+        `${item.label}：整单周期${item.period || "待人工确认"}，整单金额${item.amount != null ? formatCurrency(item.amount) : "待人工确认"}`
+      )).join("\n");
+    }
+
+    function firstValue(values) {
+      return values.find((value) => value !== "" && value != null);
+    }
+
+    function valuesSame(values) {
+      if (!values.length || values.some((value) => value == null || value === "")) return false;
+      return values.every((value) => value === values[0]);
+    }
+
+    function amountsSame(values) {
+      if (!values.length || values.some((value) => value == null)) return false;
+      return values.every((value) => Math.abs(value - values[0]) < 0.01);
+    }
+
+    function formatCurrency(value) {
+      return `${Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}元`;
+    }
+
+    function isNetUnitPriceFieldItem(item) {
+      const text = normalizeForList(item.field).toLowerCase();
+      return Number(item.rowNumber) >= TIME_SLOT_DETECT_START_ROW_NUMBER
+        && (text.includes("折后单价") || text.includes("unitpriceafterdiscount"));
+    }
+
+    function collectAdjustmentFieldsFromRecords(records) {
+      const fields = [];
+      const stats = {
+        scannedRows: 0,
+        pdbRows: 0,
+        abnormalFields: 0,
+        abnormalRows: 0
+      };
+
+      records.forEach(({ file, table }) => {
+        const orderNameCol = findOrderNameColumn(table);
+        const orderIdCol = findOrderIdColumn(table);
+        const fieldRow = getFieldRow(table);
+
+        table.rows.forEach((row, rowIndex) => {
+          if (isTimeSlotDetailRow(rowIndex)) return;
+          stats.scannedRows += 1;
+          const cells = table.cells[rowIndex] || [];
+          const orderName = normalizeCell(row[orderNameCol]) || `第 ${rowIndex + 1} 行`;
+          const orderId = normalizeCell(row[orderIdCol]);
+
+          cells.forEach((cell, colIndex) => {
+            if (!cell || !cell.yellow) return;
+            if (shouldIgnoreYellowCell(colIndex, cell, row, fieldRow)) return;
+
+            fields.push({
+              file: file.name,
+              sheet: table.name,
+              rowNumber: rowIndex + 1,
+              previewFile: file.name,
+              previewSheet: table.name,
+              previewRowNumber: rowIndex + 1,
+              orderName,
+              orderId,
+              colIndex,
+              sourceTable: table,
+              sourceRow: row,
+              isReplenishment: isReplenishmentOrderRow(row),
+              field: fieldLabel(fieldRow, colIndex),
+              address: `${columnName(colIndex)}${rowIndex + 1}`,
+              value: cell.value,
+              message: "发现调整字段"
+            });
+          });
+        });
+      });
+
+      return { fields, stats };
+    }
+
+    function detectAdjustmentScenario(adjustmentFields) {
+      if (!adjustmentFields.length) return null;
+      const sourceTables = uniqueSourceTables(adjustmentFields);
+      const volumeAndScheduleFields = adjustmentFields.filter((item) => (
+        isBookedAmountField(item) || isScheduleField(item)
+      ));
+      const hasScheduleFields = adjustmentFields.some(isScheduleField);
+      if (!volumeAndScheduleFields.length || !hasScheduleFields) return null;
+
+      const ratios = calculateOrderVolumeRatios(sourceTables);
+      const hasSpecificTimeSlot = sourceTables.some((table) => {
+        const messages = ((table.preprocess || {}).timeSlotMessages || []);
+        return messages.some((message) => message.includes("有时间段定向"));
+      });
+      if (hasSpecificTimeSlot) {
+        return buildAdjustmentScenario("新增时段定向", "细排、时段", "warn", ratios);
+      }
+
+      const scheduleChanges = volumeAndScheduleFields.filter(isScheduleField);
+      const timeSlotPairs = scheduleChanges.map(getScheduleTimeSlotPair).filter(Boolean);
+      const specificTimeSlotPairs = timeSlotPairs.filter((pair) => pair.timeCell && pair.timeCell.yellow && !isBlankScheduleValue(pair.timeCell.value));
+      if (specificTimeSlotPairs.length) {
+        return buildAdjustmentScenario("新增时段定向", "细排、时段", "warn", ratios);
+      }
+
+      const blankTimeSlotPairs = timeSlotPairs.filter((pair) => pair.timeCell && pair.timeCell.yellow && isBlankScheduleValue(pair.timeCell.value));
+      if (blankTimeSlotPairs.length) {
+        return detectDateRangeAdjustmentScenario(blankTimeSlotPairs, ratios);
+      }
+
+      const changedTypes = Array.from(new Set(volumeAndScheduleFields.map((item) => (
+        item.isReplenishment ? "补量订单项" : "原订单项"
+      ))));
+      const typeLabel = changedTypes.includes("原订单项") && changedTypes.includes("补量订单项")
+        ? "原订单项、补量订单项"
+        : changedTypes[0];
+      const sceneName = `调整铺量-${typeLabel}`;
+      return buildAdjustmentScenario(sceneName, "预定量、细排", "ok", ratios);
+    }
+
+    function detectDateRangeAdjustmentScenario(timeSlotPairs, ratios) {
+      const shrinkPairs = timeSlotPairs.filter((pair) => isBlankScheduleValue(pair.scheduleValue));
+      const expansionPairs = timeSlotPairs.filter((pair) => !isBlankScheduleValue(pair.scheduleValue));
+      const messages = [];
+      let severity = "ok";
+
+      const replenishmentShrink = shrinkPairs.some((pair) => pair.item.isReplenishment);
+      const originalShrink = shrinkPairs.some((pair) => !pair.item.isReplenishment);
+      if (replenishmentShrink) messages.push("检测到改单场景：补量订单项日期缩减");
+      if (originalShrink) {
+        messages.push("⚠ 检测到改单场景：原订单项日期缩减，请排查原因");
+        severity = "bad";
+      }
+
+      const replenishmentExpansion = expansionPairs.filter((pair) => pair.item.isReplenishment);
+      const originalExpansion = expansionPairs.some((pair) => !pair.item.isReplenishment);
+      const originalExpansionPairs = expansionPairs.filter((pair) => !pair.item.isReplenishment);
+      const isDelayReplenishment = replenishmentExpansion.length && originalExpansionPairs.length;
+
+      if (isDelayReplenishment) {
+        messages.push("检测到改单场景：延期补量");
+        const delayPeriod = summarizeChangedSchedulePeriods(expansionPairs);
+        if (delayPeriod) messages.push(`延期补量周期：${delayPeriod}`);
+      } else if (replenishmentExpansion.length) {
+        const outside = replenishmentExpansion.some((pair) => !isExpansionWithinOriginalPeriod(pair));
+        if (outside) {
+          messages.push("⚠ 检测到改单场景：补量订单项日期扩充，新增日期不在原定单项投放周期内，请补充客户确认邮件");
+          severity = "bad";
+        } else {
+          messages.push("检测到改单场景：补量订单项日期扩充");
+        }
+      }
+      if (originalExpansion && !isDelayReplenishment) {
+        messages.push("⚠ 检测到改单场景：原订单项日期扩充，请走正式改单");
+        severity = "bad";
+      }
+
+      return {
+        name: messages.join("；") || "调整铺量",
+        changedFieldLabel: "预定量、细排、时段",
+        severity,
+        ratios,
+        message: uniquePrograms(messages).join("；") || "检测到改单场景：调整铺量"
+      };
+    }
+
+    function buildAdjustmentScenario(sceneName, changedFieldLabel, severity, ratios) {
+      return {
+        name: sceneName,
+        changedFieldLabel,
+        severity,
+        ratios,
+        message: `检测到改单场景：${sceneName}`
+      };
+    }
+
+    function formatRatioMessage(ratios) {
+      return `整单预定量/整单购买量：${ratios.totalBookedToPurchased}；补量订单项预定量/整单购买量：${ratios.replenishmentBookedToPurchased}`;
+    }
+
+    function getScheduleTimeSlotPair(item) {
+      if (!item.sourceTable || !isScheduleField(item)) return null;
+      const timeSlotRowIndex = item.rowNumber;
+      const timeCell = ((item.sourceTable.cells || [])[timeSlotRowIndex] || [])[item.colIndex] || null;
+      return {
+        item,
+        timeCell,
+        scheduleValue: item.value,
+        colIndex: item.colIndex
+      };
+    }
+
+    function isBlankScheduleValue(value) {
+      const text = normalizeCell(value);
+      return !text || text === "--" || text === "?";
+    }
+
+    function isExpansionWithinOriginalPeriod(pair) {
+      const originalRow = findOriginalOrderRow(pair.item);
+      if (!originalRow) return false;
+      const originalIndexes = getSchedulePointColIndexes(originalRow);
+      if (!originalIndexes.length) return false;
+      const min = Math.min(...originalIndexes);
+      const max = Math.max(...originalIndexes);
+      return pair.colIndex >= min && pair.colIndex <= max;
+    }
+
+    function summarizeChangedSchedulePeriods(pairs) {
+      const dateItems = pairs
+        .map((pair) => getScheduleDateInfoForColumn(pair.item.sourceTable, pair.colIndex))
+        .filter(Boolean)
+        .sort((a, b) => a.date - b.date);
+      if (!dateItems.length) return "";
+      const uniqueItems = [];
+      const seen = new Set();
+      dateItems.forEach((item) => {
+        const key = item.text;
+        if (seen.has(key)) return;
+        seen.add(key);
+        uniqueItems.push(item);
+      });
+
+      const ranges = [];
+      let start = uniqueItems[0];
+      let previous = uniqueItems[0];
+      for (let index = 1; index < uniqueItems.length; index += 1) {
+        const current = uniqueItems[index];
+        const gapDays = Math.round((current.date - previous.date) / 86400000);
+        if (gapDays === 1) {
+          previous = current;
+          continue;
+        }
+        ranges.push(formatScheduleDateRange(start, previous));
+        start = current;
+        previous = current;
+      }
+      ranges.push(formatScheduleDateRange(start, previous));
+      return ranges.join("；");
+    }
+
+    function getScheduleDateInfoForColumn(table, colIndex) {
+      if (!table || !Number.isFinite(Number(colIndex))) return null;
+      const monthRow = table.rows[10] || [];
+      const dayRow = table.rows[12] || [];
+      let currentMonthInfo = null;
+      for (let index = SCHEDULE_START_COL; index <= colIndex; index += 1) {
+        currentMonthInfo = parseScheduleMonth(monthRow[index]) || currentMonthInfo;
+      }
+      const text = formatScheduleDate(currentMonthInfo, dayRow[colIndex]);
+      if (!text || !currentMonthInfo) return null;
+      const day = parseInt(normalizeCell(dayRow[colIndex]), 10);
+      if (!Number.isFinite(day)) return null;
+      return {
+        text,
+        date: new Date(currentMonthInfo.year, currentMonthInfo.month - 1, day).getTime()
+      };
+    }
+
+    function formatScheduleDateRange(start, end) {
+      if (!start || !end) return "";
+      return start.text === end.text ? start.text : `${start.text}~${end.text}`;
+    }
+
+    function findOriginalOrderRow(item) {
+      const originalOrderId = normalizeCell(item.sourceRow && item.sourceRow[COL_BH]);
+      if (!originalOrderId || !item.sourceTable) return null;
+      return (item.sourceTable.rows || []).find((row) => normalizeCell(row[1]) === originalOrderId) || null;
+    }
+
+    function getSchedulePointColIndexes(row) {
+      const indexes = [];
+      for (let colIndex = SCHEDULE_START_COL; colIndex < row.length; colIndex += 1) {
+        if (isSchedulePoint(row[colIndex])) indexes.push(colIndex);
+      }
+      return indexes;
+    }
+
+    function uniqueSourceTables(items) {
+      const tables = [];
+      const seen = new Set();
+      items.forEach((item) => {
+        if (!item.sourceTable) return;
+        const key = `${item.file}｜${item.sheet}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        tables.push(item.sourceTable);
+      });
+      return tables;
+    }
+
+    function getUploadedGreenScheduleTables() {
+      return state.files.flatMap((file) => file.tables || []);
+    }
+
+    function isBookedAmountField(item) {
+      return item.colIndex === COL_BV || normalizeForList(item.field).includes("预定量");
+    }
+
+    function isScheduleField(item) {
+      return Number(item.colIndex) >= SCHEDULE_START_COL;
+    }
+
+    function isReplenishmentOrderRow(row) {
+      return normalizeCell(row[COL_R]) === "补量";
+    }
+
+    function calculateOrderVolumeRatios(tables) {
+      const totals = tables.reduce((sum, table) => {
+        (table.rows || []).forEach((row, rowIndex) => {
+          if (rowIndex + 1 < TIME_SLOT_DETECT_START_ROW_NUMBER || isTimeSlotDetailRow(rowIndex)) return;
+          const booked = parseAmount(row[COL_BV]);
+          const purchased = parseAmount(row[COL_BZ]);
+          sum.booked += booked;
+          sum.purchased += purchased;
+          if (isReplenishmentOrderRow(row)) sum.replenishmentBooked += booked;
+        });
+        return sum;
+      }, { booked: 0, purchased: 0, replenishmentBooked: 0 });
+
+      return {
+        booked: totals.booked,
+        purchased: totals.purchased,
+        replenishmentBooked: totals.replenishmentBooked,
+        totalBookedToPurchased: formatRatio(totals.booked, totals.purchased),
+        replenishmentBookedToPurchased: formatRatio(totals.replenishmentBooked, totals.purchased)
+      };
+    }
+
+    function parseAmount(value) {
+      const text = normalizeCell(value).replace(/,/g, "");
+      if (!text || text === "--") return 0;
+      const number = Number(text);
+      return Number.isFinite(number) ? number : 0;
+    }
+
+    function formatRatio(numerator, denominator) {
+      if (!denominator) return "无法计算（整单购买量为0）";
+      return `${(numerator / denominator * 100).toFixed(2)}%`;
+    }
+
+    function findOrderNameColumn(table) {
+      const header = getFieldRow(table);
+      const candidates = ["订单项名称", "订单名称", "项目名称", "商品名称", "名称"];
+      const found = header.findIndex((cell) => candidates.some((name) => normalizeCell(cell).includes(name)));
+      return found >= 0 ? found : 1;
+    }
+
+    function findOrderIdColumn(table) {
+      const header = getFieldRow(table);
+      const candidates = ["订单项ID", "订单项id", "订单ID", "订单id", "ID", "id"];
+      const found = header.findIndex((cell) => candidates.some((name) => normalizeCell(cell).includes(name)));
+      return found >= 0 ? found : 0;
+    }
+
+    function findDateRangeColumn(table) {
+      const header = getFieldRow(table);
+      const candidates = ["投放日期范围", "投放日期", "日期范围", "开始日期", "排期"];
+      const found = header.findIndex((cell) => candidates.some((name) => normalizeCell(cell).includes(name)));
+      return found >= 0 ? found : 2;
+    }
+
+    function getFieldRow(table) {
+      return (table.rows && (table.rows[12] || table.rows[0])) || [];
+    }
+
+    function fieldLabel(fieldRow, colIndex) {
+      const fieldName = normalizeCell(fieldRow[colIndex]);
+      return fieldName || `${columnName(colIndex)}列`;
+    }
+
+    function normalizeForList(value) {
+      return String(value || "").replace(/\s+/g, "").trim();
+    }
+
+    function compareReverseProgramList(value, expectedPrograms) {
+      const parsed = parseDirectionalProgramList(value);
+      const expectedCounts = countPrograms(expectedPrograms);
+      const actualReverseCounts = countPrograms(parsed.reverse);
+      const missing = diffProgramCounts(expectedCounts, actualReverseCounts);
+      const extra = diffProgramCounts(actualReverseCounts, expectedCounts);
+      const positives = uniquePrograms(parsed.positive);
+      const details = [];
+
+      if (extra.length) details.push(`多${extra.join("、")}`);
+      if (missing.length) details.push(`少${missing.join("、")}`);
+      if (positives.length) details.push(`出现(正)：${positives.join("、")}`);
+      if (parsed.reverse.length !== expectedPrograms.length) {
+        details.push(`(反)数量${parsed.reverse.length}个，应为${expectedPrograms.length}个`);
+      }
+
+      return {
+        ok: !details.length,
+        message: details.length ? `反定向剧单异常，${details.join("；")}` : ""
+      };
+    }
+
+    function parseDirectionalProgramList(value) {
+      const text = String(value || "");
+      const markers = [];
+      const pattern = /(?:\(|（)\s*(反|正)\s*(?:\)|）)/g;
+      let match;
+      while ((match = pattern.exec(text)) !== null) {
+        markers.push({
+          type: match[1],
+          start: match.index,
+          end: pattern.lastIndex
+        });
+      }
+
+      return markers.reduce((result, marker, index) => {
+        const next = markers[index + 1];
+        const rawName = text.slice(marker.end, next ? next.start : text.length);
+        const program = normalizeDirectionalProgramName(rawName);
+        if (program) {
+          if (marker.type === "反") result.reverse.push(program);
+          if (marker.type === "正") result.positive.push(program);
+        }
+        return result;
+      }, { reverse: [], positive: [] });
+    }
+
+    function normalizeDirectionalProgramName(value) {
+      return normalizeCell(value)
+        .replace(/^[,，、;；\s]+|[,，、;；\s]+$/g, "")
+        .trim();
+    }
+
+    function countPrograms(programs) {
+      return programs.reduce((counts, program) => {
+        const key = normalizeForList(program);
+        if (!key) return counts;
+        if (!counts.has(key)) counts.set(key, { label: program, count: 0 });
+        counts.get(key).count += 1;
+        return counts;
+      }, new Map());
+    }
+
+    function diffProgramCounts(leftCounts, rightCounts) {
+      const diff = [];
+      leftCounts.forEach((left, key) => {
+        const gap = left.count - ((rightCounts.get(key) || {}).count || 0);
+        for (let index = 0; index < gap; index += 1) diff.push(left.label);
+      });
+      return diff;
+    }
+
+    function uniquePrograms(programs) {
+      const seen = new Set();
+      return programs.filter((program) => {
+        const key = normalizeForList(program);
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
+    function summarizeSchedulePeriod(table, row) {
+      const dates = getScheduleDates(table, row);
+      if (!dates.length) return "未检测到排期打点";
+      const first = dates[0];
+      const last = dates[dates.length - 1];
+      if (first === last) return first;
+      return `${first} 至 ${last}`;
+    }
+
+    function getScheduleDates(table, row) {
+      const monthRow = table.rows[10] || [];
+      const dayRow = table.rows[12] || [];
+      const dates = [];
+      let currentMonthInfo = null;
+      for (let colIndex = SCHEDULE_START_COL; colIndex < row.length; colIndex += 1) {
+        currentMonthInfo = parseScheduleMonth(monthRow[colIndex]) || currentMonthInfo;
+        if (!isSchedulePoint(row[colIndex])) continue;
+        const dateText = formatScheduleDate(currentMonthInfo, dayRow[colIndex]);
+        if (dateText) dates.push(dateText);
+      }
+      return dates.filter((date, index) => dates.indexOf(date) === index);
+    }
+
+    function isSchedulePoint(value) {
+      const text = normalizeCell(value);
+      if (!text || text === "--") return false;
+      const numeric = Number(text.replace(/,/g, ""));
+      return Number.isFinite(numeric) && numeric > 0;
+    }
+
+    function formatScheduleDate(monthInfo, dayValue) {
+      const day = parseInt(normalizeCell(dayValue), 10);
+      if (!monthInfo || !Number.isFinite(day)) return "";
+      return `${monthInfo.year}年${String(monthInfo.month).padStart(2, "0")}月${String(day).padStart(2, "0")}日`;
+    }
+
+    function parseScheduleMonth(value) {
+      const text = normalizeCell(value);
+      const match = text.match(/^([A-Za-z]{3,9})\.?\s*(?:-|\/|\.)\s*(\d{4})$/);
+      if (!match) return null;
+      const monthMap = {
+        jan: 1, january: 1,
+        feb: 2, february: 2,
+        mar: 3, march: 3,
+        apr: 4, april: 4,
+        may: 5,
+        jun: 6, june: 6,
+        jul: 7, july: 7,
+        aug: 8, august: 8,
+        sep: 9, sept: 9, september: 9,
+        oct: 10, october: 10,
+        nov: 11, november: 11,
+        dec: 12, december: 12
+      };
+      const month = monthMap[match[1].toLowerCase()];
+      const year = Number(match[2]);
+      if (!month || !year) return null;
+      return { year, month };
+    }
+
+    function normalizeZero(value) {
+      return String(value ?? "").trim() === "0" || Number(value) === 0;
+    }
+
+    function is15sBrandMomentRow(row) {
+      const product = normalizeCell(row[COL_D]);
+      return product.includes("品牌时刻") && is15SecondDuration(row[COL_H]);
+    }
+
+    function is15SecondDuration(value) {
+      const text = normalizeCell(value).toLowerCase();
+      if (!text) return false;
+      if (Number(text) === 15) return true;
+      return /^15(?:\.0+)?\s*(s|秒)?$/.test(text);
+    }
+
+    function shouldIgnoreYellowCell(colIndex, cell, row, fieldRow) {
+      if (isPmpInfoField(fieldRow, colIndex)) return true;
+      if (colIndex === COL_BW) return true;
+      if (colIndex === COL_CA && normalizeZero(cell.value)) return true;
+      if (colIndex === COL_AJ && is15sBrandMomentRow(row)) return true;
+      return false;
+    }
+
+    function isPmpInfoField(fieldRow, colIndex) {
+      return normalizeForList(fieldLabel(fieldRow || [], colIndex)).toLowerCase() === "pmp信息";
+    }
+
+    function isFullyYellowRow(row, cells) {
+      const filledColIndexes = row
+        .map((value, index) => normalizeCell(value) ? index : -1)
+        .filter((index) => index >= 0);
+      return filledColIndexes.length > 0 && filledColIndexes.every((colIndex) => cells[colIndex] && cells[colIndex].yellow);
+    }
+
+    function groupAbnormalFieldsByRow(items) {
+      const groups = new Map();
+      items.forEach((item) => {
+        const key = `${item.file}｜${item.sheet}｜${item.rowNumber}`;
+        if (!groups.has(key)) {
+          groups.set(key, {
+            ...item,
+            fields: [],
+            addresses: [],
+            values: [],
+            messages: []
+          });
+        }
+        const group = groups.get(key);
+        if (item.isNewOrderRow) {
+          group.field = "整行标黄";
+          group.address = `${item.rowNumber}行`;
+          group.value = "";
+          group.message = "此行为新增订单项，请人工核对绿排期";
+          group.isNewOrderRow = true;
+          return;
+        }
+        if (group.isNewOrderRow) return;
+        if (item.field && !group.fields.includes(item.field)) group.fields.push(item.field);
+        if (item.address && !group.addresses.includes(item.address)) group.addresses.push(item.address);
+        if (normalizeCell(item.value)) group.values.push(`${item.field}：${normalizeCell(item.value)}`);
+        if (item.message && !group.messages.includes(item.message)) group.messages.push(item.message);
+        group.field = group.fields.join("；");
+        group.address = group.addresses.join("；");
+        group.value = group.values.join("；");
+        group.message = group.messages.join("；");
+      });
+      return Array.from(groups.values()).map(({ fields, addresses, values, messages, colIndex, sourceTable, sourceRow, isReplenishment, ...item }) => item);
+    }
+
+    function renderResults() {
+      document.querySelector("#totalCount").textContent = state.stats.scannedRows;
+      document.querySelector("#passCount").textContent = state.stats.pdbRows;
+      document.querySelector("#warnCount").textContent = state.stats.abnormalFields;
+      document.querySelector("#failCount").textContent = state.stats.abnormalRows;
+
+      if (!state.results.length) {
+        emptyState.classList.remove("hidden");
+        resultWrap.classList.add("hidden");
+        renderResultEmptyState();
+        renderToolNotice();
+        return;
+      }
+
+      emptyState.classList.add("hidden");
+      resultWrap.classList.remove("hidden");
+      resultBody.innerHTML = state.results.map((item) => {
+        if (item.settlementSummary) {
+          const toneClass = item.status === "bad" ? "danger-summary" : item.status === "warn" ? "warn-summary" : "";
+          return `<tr><td colspan="8"><div class="no-change-result settlement-result ${toneClass}">${renderMultilineText(item.message)}</div></td></tr>`;
+        }
+        if (item.noChange) {
+          return `<tr><td colspan="8"><div class="no-change-message">${escapeHtml(item.message)}</div></td></tr>`;
+        }
+        const rowAttrs = buildPreviewRowAttrs(item);
+        return `
+        <tr${rowAttrs}>
+          <td>${escapeHtml(item.file)}</td>
+          <td>${escapeHtml(item.sheet)}</td>
+          <td>${escapeHtml(item.rowNumber)}</td>
+          <td>${escapeHtml(item.orderName)}</td>
+          <td>${escapeHtml(item.rule)}</td>
+          <td>${renderTag(item.status)}</td>
+          <td>${escapeHtml(item.abnormalField)}</td>
+          <td>${escapeHtml(item.message)}</td>
+        </tr>
+      `;
+      }).join("");
+    }
+
+    function renderMultilineText(value) {
+      return escapeHtml(value).replace(/\n/g, "<br>");
+    }
+
+    function renderToolNotice() {
+      const noChangeResult = state.activeTool === "adjustment"
+        ? state.results.find((item) => item.noChange)
+        : null;
+      if (!noChangeResult) {
+        toolNoticeArea.classList.add("hidden");
+        toolNoticeArea.innerHTML = "";
+        return;
+      }
+      toolNoticeArea.classList.remove("hidden");
+      toolNoticeArea.innerHTML = `<div class="no-change-result">${escapeHtml(noChangeResult.message)}</div>`;
+    }
+
+    function renderBrandSummary() {
+      if (state.activeTool === "brand" && state.unmodifiedBrandItems.length) {
+        brandSummaryPanel.classList.remove("hidden");
+        brandSummaryPanel.innerHTML = `
+          <div class="no-change-result warn-summary">
+            <div>检测到未修改剧单的品牌时刻订单项</div>
+            <ul class="summary-detail-list">
+              ${state.unmodifiedBrandItems.map((item) => `
+                <li>${escapeHtml(item.orderName)}：${escapeHtml(item.period)}</li>
+              `).join("")}
+            </ul>
+          </div>
+        `;
+        return;
+      }
+
+      const shouldShow = state.activeTool === "brand"
+        && state.results.length
+        && state.results.every((item) => item.status === "ok")
+        && !state.stats.abnormalFields
+        && !state.stats.abnormalRows
+        && !state.abnormalFields.length;
+      if (!shouldShow) {
+        brandSummaryPanel.classList.add("hidden");
+        brandSummaryPanel.innerHTML = "";
+        return;
+      }
+      brandSummaryPanel.classList.remove("hidden");
+      brandSummaryPanel.innerHTML = `<div class="no-change-result">反定向剧单正确，无其他修改</div>`;
+    }
+
+    function renderAdjustmentScenarioPreview() {
+      if (!adjustmentScenarioPreview) return;
+      const scenarioPlaceholder = "上传绿排期并识别后，将在这里显示检测到的改单场景。";
+      const volumePlaceholder = "预定量有调整时，将在这里显示预定量和购买量比例。";
+      if (state.activeTool !== "adjustment") {
+        adjustmentScenarioPreview.innerHTML = scenarioPlaceholder;
+        if (adjustmentVolumePreview) adjustmentVolumePreview.innerHTML = volumePlaceholder;
+        return;
+      }
+      if (!state.adjustmentScenario) {
+        adjustmentScenarioPreview.innerHTML = scenarioPlaceholder;
+      } else {
+        const toneClass = state.adjustmentScenario.severity === "bad" ? "danger-summary" : "";
+        adjustmentScenarioPreview.innerHTML = `<div class="no-change-result scenario-notice ${toneClass}">${formatScenarioPreviewLines(state.adjustmentScenario.message)}</div>`;
+      }
+
+      if (!adjustmentVolumePreview) return;
+      if (!state.adjustmentVolumeRatios) {
+        adjustmentVolumePreview.innerHTML = volumePlaceholder;
+        return;
+      }
+      adjustmentVolumePreview.innerHTML = `<div class="no-change-result scenario-notice">${formatScenarioPreviewLines(formatRatioMessage(state.adjustmentVolumeRatios))}</div>`;
+    }
+
+    function formatScenarioPreviewLines(message) {
+      return String(message || "")
+        .split("；")
+        .map((part) => part.trim().replace(/^⚠\s*检测到改单场景：/, "⚠ ").replace(/^检测到改单场景：/, ""))
+        .filter(Boolean)
+        .map((part) => `<span class="scenario-line">${escapeHtml(part)}</span>`)
+        .join("");
+    }
+
+    function renderResultEmptyState() {
+      if (state.activeTool === "brand") {
+        emptyState.innerHTML = `<div><strong>等待核对</strong><p class="hint">上传待核对文件，并粘贴包含“序号、节目、奇谱ID、更新时间”的四列表格后开始核对。</p></div>`;
+        return;
+      }
+      if (state.activeTool === "settlement") {
+        emptyState.innerHTML = `<div><strong>等待识别</strong><p class="hint">上传实结待审核邮件，或直接上传客户排期、执行排期和绿排期后开始识别。</p></div>`;
+        return;
+      }
+      emptyState.innerHTML = `<div><strong>等待识别</strong><p class="hint">上传绿排期文件后，点击“识别修改字段”查看所有标黄调整字段。</p></div>`;
+    }
+
+    function renderAbnormalFields() {
+      const itemName = state.activeTool === "brand" ? "异常" : "调整";
+      abnormalSummaryText.textContent = state.abnormalFields.length ? `${state.abnormalFields.length} 行${itemName}` : `暂无${itemName}`;
+      if (!state.abnormalFields.length) {
+        abnormalEmptyState.classList.remove("hidden");
+        abnormalEmptyState.textContent = state.activeTool === "brand"
+          ? "核对后如有异常，会在这里列出异常行的订单项名称和异常字段。"
+          : "识别后如有调整，会在这里列出调整行的订单项名称、调整字段和字段赋值。";
+        abnormalWrap.classList.add("hidden");
+        abnormalFilterGrid.classList.add("hidden");
+        abnormalBody.innerHTML = "";
+        renderAbnormalColumnFilterOptions();
+        return;
+      }
+
+      abnormalEmptyState.classList.add("hidden");
+      abnormalWrap.classList.remove("hidden");
+      abnormalFilterGrid.classList.remove("hidden");
+      renderAbnormalColumnFilterOptions();
+      const filteredItems = getFilteredAbnormalFields();
+      abnormalSummaryText.textContent = hasActiveAbnormalColumnFilters()
+        ? `${filteredItems.length}/${state.abnormalFields.length} 行${itemName}`
+        : `${state.abnormalFields.length} 行${itemName}`;
+      abnormalBody.innerHTML = filteredItems.map((item) => {
+        const rowAttrs = buildPreviewRowAttrs(item);
+        return `
+        <tr${rowAttrs}>
+          <td>${escapeHtml(item.rowNumber)}</td>
+          <td>${escapeHtml(item.orderId)}</td>
+          <td>${escapeHtml(item.orderName)}</td>
+          <td>${escapeHtml(item.field)}</td>
+          <td>${escapeHtml(item.address)}</td>
+          <td>${escapeHtml(item.value)}</td>
+          <td>${escapeHtml(item.message)}</td>
+        </tr>
+      `;
+      }).join("");
+    }
+
+    function renderAbnormalColumnFilterOptions() {
+      renderHeaderFilterOptions(abnormalFieldFilter, "field", "全部字段", state.abnormalFields.map((item) => item.field));
+      renderHeaderFilterOptions(abnormalValueFilter, "value", "全部当前值", state.abnormalFields.map((item) => item.value));
+      renderHeaderFilterOptions(abnormalMessageFilter, "message", "全部说明", state.abnormalFields.map((item) => item.message));
+    }
+
+    function renderHeaderFilterOptions(select, key, defaultLabel, rawValues) {
+      const values = Array.from(new Set(rawValues.map((value) => normalizeCell(value)).filter(Boolean))).sort();
+      const current = values.includes(state.abnormalColumnFilters[key]) ? state.abnormalColumnFilters[key] : "";
+      if (current !== state.abnormalColumnFilters[key]) state.abnormalColumnFilters[key] = current;
+      select.classList.toggle("is-active", Boolean(current));
+      select.innerHTML = `
+        <option value="">${defaultLabel}</option>
+        ${values.map((value) => `<option value="${escapeHtml(value)}"${value === current ? " selected" : ""}>${escapeHtml(value)}</option>`).join("")}
+      `;
+    }
+
+    function getFilteredAbnormalFields() {
+      return state.abnormalFields.filter((item) => (
+        matchesAbnormalColumnFilter(item, "field")
+        && matchesAbnormalColumnFilter(item, "value")
+        && matchesAbnormalColumnFilter(item, "message")
+      ));
+    }
+
+    function matchesAbnormalColumnFilter(item, key) {
+      const filterValue = state.abnormalColumnFilters[key];
+      if (!filterValue) return true;
+      return normalizeCell(item[key]) === filterValue;
+    }
+
+    function hasActiveAbnormalColumnFilters() {
+      return Object.values(state.abnormalColumnFilters).some(Boolean);
+    }
+
+    function handleAbnormalColumnFilter(event) {
+      const filterMap = new Map([
+        [abnormalFieldFilter, "field"],
+        [abnormalValueFilter, "value"],
+        [abnormalMessageFilter, "message"]
+      ]);
+      const key = filterMap.get(event.target);
+      if (!key) return;
+      state.abnormalColumnFilters[key] = event.target.value;
+      renderAbnormalFields();
+    }
+
+    function resetAbnormalColumnFilters() {
+      state.abnormalColumnFilters = {
+        field: "",
+        value: "",
+        message: ""
+      };
+    }
+
+    function buildPreviewRowAttrs(item) {
+      if (!item.previewFile || !item.previewSheet || !Number(item.previewRowNumber)) return "";
+      return ` class="clickable-result-row" data-preview-file="${escapeHtml(item.previewFile)}" data-preview-sheet="${escapeHtml(item.previewSheet)}" data-preview-row="${escapeHtml(item.previewRowNumber)}" data-preview-address="${escapeHtml(item.address || "")}" title="点击后在绿排期预览中显示这一行"`;
+    }
+
+    function handleResultRowClick(event) {
+      const row = event.target.closest("[data-preview-row]");
+      if (!row) return;
+      event.stopPropagation();
+      state.previewFocus = {
+        file: row.dataset.previewFile,
+        sheet: row.dataset.previewSheet,
+        rowNumber: Number(row.dataset.previewRow),
+        colIndexes: parseAddressColIndexes(row.dataset.previewAddress)
+      };
+      renderFiles();
+      initResizableColumns();
+      applyFreeze();
+      const target = document.querySelector(".focused-preview-cell") || document.querySelector(".focused-preview-row");
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+    }
+
+    function handlePreviewClick(event) {
+      const cell = event.target.closest(".preview-table td");
+      if (!cell) return;
+      event.stopPropagation();
+      const table = cell.closest(".preview-table");
+      state.previewFocus = {
+        file: table.dataset.previewFile,
+        sheet: table.dataset.previewSheet,
+        rowNumber: Number(cell.dataset.row) + 1,
+        colIndexes: [Number(cell.dataset.col)]
+      };
+      renderFiles();
+      initResizableColumns();
+      applyFreeze();
+    }
+
+    function handleDocumentClick(event) {
+      if (!state.previewFocus) return;
+      if (event.target.closest(".preview-table-wrap, .result-table-wrap, button, input, textarea, select, label, .drop-zone")) return;
+      clearPreviewFocus();
+    }
+
+    function clearPreviewFocus() {
+      state.previewFocus = null;
+      renderFiles();
+      initResizableColumns();
+      applyFreeze();
+    }
+
+    function parseAddressColIndexes(addressText) {
+      return Array.from(new Set(String(addressText || "")
+        .match(/[A-Z]+(?=\d+)/g)
+        ?.map((letters) => lettersToColumnIndex(letters))
+        .filter((index) => index >= 0) || []));
+    }
+
+    function lettersToColumnIndex(letters) {
+      return String(letters || "").split("").reduce((sum, char) => sum * 26 + char.charCodeAt(0) - 64, 0) - 1;
+    }
+
+    function renderTag(status) {
+      const labels = { ok: "通过", warn: "需确认", bad: "异常" };
+      return `<span class="tag ${status}">${labels[status]}</span>`;
+    }
+
+    function exportResults() {
+      if (!(state.results.length || state.abnormalFields.length)) return;
+
+      const resultRows = [
+        ["文件", "工作表", "行号", "订单项名称", state.activeTool === "brand" ? "核对规则" : "识别规则", state.activeTool === "brand" ? "核对结果" : "识别结果", state.activeTool === "brand" ? "异常字段" : "修改字段", "说明"],
+        ...state.results.map((item) => [
+          item.file,
+          item.sheet,
+          item.rowNumber,
+          item.orderName,
+          item.rule,
+          item.status === "ok" ? "通过" : item.status === "bad" ? "异常" : "需确认",
+          item.abnormalField,
+          item.message
+        ])
+      ];
+      const abnormalRows = [
+        ["行号", "订单项ID", "订单项名称", state.activeTool === "brand" ? "异常字段" : "修改字段", "单元格", "当前值", "说明"],
+        ...state.abnormalFields.map((item) => [
+          item.rowNumber,
+          item.orderId,
+          item.orderName,
+          item.field,
+          item.address,
+          item.value,
+          item.message
+        ])
+      ];
+
+      const fileName = `${getExportBaseName()}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      if (window.XLSX) {
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(resultRows), state.activeTool === "brand" ? "核对结果" : "识别结果");
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(abnormalRows), state.activeTool === "brand" ? "异常字段" : "修改字段检测");
+        const output = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+        downloadBlob(new Blob([output], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), fileName);
+        return;
+      }
+
+      downloadBlob(buildSimpleXlsx(resultRows), fileName);
+    }
+
+    function getExportBaseName() {
+      if (state.activeTool === "brand") return "核对结果";
+      if (state.activeTool === "settlement") return "实际结算";
+      return "绿排期修改字段识别";
+    }
+
+    function buildSimpleXlsx(rows) {
+      const files = {
+        "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`,
+        "_rels/.rels": `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
+        "xl/workbook.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="核对结果" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+        "xl/_rels/workbook.xml.rels": `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`,
+        "xl/worksheets/sheet1.xml": makeSheetXml(rows)
+      };
+      return zipStore(files);
+    }
+
+    function makeSheetXml(rows) {
+      const sheetData = rows.map((row, rowIndex) => {
+        const cells = row.map((value, colIndex) => {
+          const ref = `${columnName(colIndex)}${rowIndex + 1}`;
+          return `<c r="${ref}" t="inlineStr"><is><t>${xmlEscape(value)}</t></is></c>`;
+        }).join("");
+        return `<row r="${rowIndex + 1}">${cells}</row>`;
+      }).join("");
+      return `<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetData}</sheetData></worksheet>`;
+    }
+
+    function zipStore(files) {
+      const encoder = new TextEncoder();
+      const chunks = [];
+      const central = [];
+      let offset = 0;
+      Object.entries(files).forEach(([name, content]) => {
+        const nameBytes = encoder.encode(name);
+        const data = encoder.encode(content);
+        const crc = crc32(data);
+        const local = new Uint8Array(30 + nameBytes.length);
+        const view = new DataView(local.buffer);
+        view.setUint32(0, 0x04034b50, true);
+        view.setUint16(4, 20, true);
+        view.setUint16(8, 0, true);
+        view.setUint32(14, crc, true);
+        view.setUint32(18, data.length, true);
+        view.setUint32(22, data.length, true);
+        view.setUint16(26, nameBytes.length, true);
+        local.set(nameBytes, 30);
+        chunks.push(local, data);
+        const dir = new Uint8Array(46 + nameBytes.length);
+        const dirView = new DataView(dir.buffer);
+        dirView.setUint32(0, 0x02014b50, true);
+        dirView.setUint16(4, 20, true);
+        dirView.setUint16(6, 20, true);
+        dirView.setUint32(16, crc, true);
+        dirView.setUint32(20, data.length, true);
+        dirView.setUint32(24, data.length, true);
+        dirView.setUint16(28, nameBytes.length, true);
+        dirView.setUint32(42, offset, true);
+        dir.set(nameBytes, 46);
+        central.push(dir);
+        offset += local.length + data.length;
+      });
+      const centralSize = central.reduce((sum, item) => sum + item.length, 0);
+      const end = new Uint8Array(22);
+      const endView = new DataView(end.buffer);
+      endView.setUint32(0, 0x06054b50, true);
+      endView.setUint16(8, central.length, true);
+      endView.setUint16(10, central.length, true);
+      endView.setUint32(12, centralSize, true);
+      endView.setUint32(16, offset, true);
+      return new Blob([...chunks, ...central, end], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    }
+
+    function crc32(data) {
+      let crc = -1;
+      for (let i = 0; i < data.length; i += 1) crc = (crc >>> 8) ^ crcTable[(crc ^ data[i]) & 0xff];
+      return (crc ^ -1) >>> 0;
+    }
+
+    const crcTable = Array.from({ length: 256 }, (_, index) => {
+      let c = index;
+      for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      return c >>> 0;
+    });
+
+    function isYellowCell(cell) {
+      if (!cell || !cell.s) return false;
+      const candidates = [
+        cell.s.fgColor,
+        cell.s.bgColor,
+        cell.s.fill && cell.s.fill.fgColor,
+        cell.s.fill && cell.s.fill.bgColor,
+        cell.s.patternFill && cell.s.patternFill.fgColor,
+        cell.s.patternFill && cell.s.patternFill.bgColor
+      ].filter(Boolean);
+      return candidates.some((color) => {
+        const raw = String(color.rgb || color.indexed || color.theme || color).toUpperCase();
+        return raw.includes("FFFF00") || raw.includes("FFFFFF00") || raw.includes("FFF2CC") || raw.includes("FFD966");
+      });
+    }
+
+    function clearAll() {
+      state.files = [];
+      state.combinedText = "";
+      state.referenceRows = [];
+      state.ruleNotes = "";
+      state.results = [];
+      state.abnormalFields = [];
+      state.unmodifiedBrandItems = [];
+      state.adjustmentScenario = null;
+      state.adjustmentVolumeRatios = null;
+      state.settlementSummary = null;
+      state.previewTables = [];
+      state.previewFocus = null;
+      resetAbnormalColumnFilters();
+      resetStats();
+      fileInput.value = "";
+      referenceTableText.value = "";
+      ruleText.value = "";
+      renderFiles();
+      renderProgramPreview();
+      renderResults();
+      renderAbnormalFields();
+      renderToolNotice();
+      renderBrandSummary();
+      renderAdjustmentScenarioPreview();
+      updateReadyState();
+      exportBtn.disabled = true;
+      lastRunText.textContent = "尚未执行";
+      setStatus(getWaitingStatusText(state.activeTool), "warn");
+    }
+
+    function resetUploadedFilesOnly() {
+      state.files = [];
+      state.combinedText = "";
+      resetRunStateOnly();
+      state.previewTables = [];
+      state.previewFocus = null;
+      fileInput.value = "";
+      renderFiles();
+      renderResults();
+      renderAbnormalFields();
+      renderToolNotice();
+      renderBrandSummary();
+      renderAdjustmentScenarioPreview();
+      exportBtn.disabled = true;
+      lastRunText.textContent = "尚未执行";
+    }
+
+    function resetRunStateOnly() {
+      state.results = [];
+      state.abnormalFields = [];
+      state.unmodifiedBrandItems = [];
+      state.adjustmentScenario = null;
+      state.adjustmentVolumeRatios = null;
+      state.settlementSummary = null;
+      state.previewFocus = null;
+      resetAbnormalColumnFilters();
+      resetStats();
+      renderResults();
+      renderAbnormalFields();
+      renderToolNotice();
+      renderBrandSummary();
+      renderAdjustmentScenarioPreview();
+      exportBtn.disabled = true;
+      lastRunText.textContent = "尚未执行";
+    }
+
+    function updateReadyState() {
+      const hasFile = state.files.length > 0;
+      const hasPrograms = state.referenceRows.length > 0;
+      runCheckBtn.disabled = state.activeTool === "brand" ? !(hasFile && hasPrograms) : !hasFile;
+    }
+
+    function resetStats() {
+      state.stats = {
+        scannedRows: 0,
+        pdbRows: 0,
+        abnormalFields: 0,
+        abnormalRows: 0
+      };
+    }
+
+    function setStatus(text, tone) {
+      statusText.textContent = text;
+      statusDot.style.background = tone === "ok" ? "var(--ok)" : tone === "bad" ? "var(--bad)" : "var(--warn)";
+    }
+
+    function formatBytes(bytes) {
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+      return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    }
+
+    function getExtension(name) {
+      return name.includes(".") ? name.split(".").pop().toLowerCase() : "未知类型";
+    }
+
+    function columnName(index) {
+      let name = "";
+      let n = index + 1;
+      while (n > 0) {
+        const remainder = (n - 1) % 26;
+        name = String.fromCharCode(65 + remainder) + name;
+        n = Math.floor((n - 1) / 26);
+      }
+      return name;
+    }
+
+    function downloadBlob(blob, fileName) {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function xmlEscape(value) {
+      return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll("\"", "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+  </script>
+</body>
+</html>
