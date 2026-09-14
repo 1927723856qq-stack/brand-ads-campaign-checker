@@ -1240,7 +1240,19 @@
                 rows.push(row);
                 cells.push(cellRow);
               }
-              const table = { name: sheetName, rows, cells };
+              const merges = (sheet["!merges"] || []).map((merge) => ({
+                s: {
+                  r: merge.s.r - range.s.r,
+                  c: merge.s.c - range.s.c
+                },
+                e: {
+                  r: merge.e.r - range.s.r,
+                  c: merge.e.c - range.s.c
+                }
+              })).filter((merge) => (
+                merge.s.r >= 0 && merge.s.c >= 0 && merge.e.r >= merge.s.r && merge.e.c >= merge.s.c
+              ));
+              const table = { name: sheetName, rows, cells, merges };
               table.preprocess = preprocessTable(table);
               return table;
             });
@@ -2098,7 +2110,8 @@
         period: "",
         detailPeriod: "",
         headerPeriod: "",
-        filePeriod: ""
+        filePeriod: "",
+        flightingMode: ""
       };
       if (!record) return result;
 
@@ -2116,7 +2129,9 @@
       const amountCol = findHeaderColumn(header, amountCandidates);
       if (quantityCol >= 0) result.quantity = readTotalOrSum(table, headerRowIndex, quantityCol);
       if (amountCol >= 0) result.amount = readTotalOrSum(table, headerRowIndex, amountCol);
-      result.detailPeriod = getSettlementDetailedSchedulePeriod(table, headerRowIndex);
+      const detail = getSettlementDetailedSchedulePeriod(table, headerRowIndex);
+      result.detailPeriod = detail.period || "";
+      result.flightingMode = detail.mode || "";
       result.headerPeriod = findHeaderPeriodInTable(table);
       result.filePeriod = findPeriodInText(record.file.name);
       result.period = firstValue([result.detailPeriod, result.headerPeriod, result.filePeriod]);
@@ -2218,24 +2233,64 @@
 
     function getSettlementDetailedSchedulePeriod(table, headerRowIndex) {
       const rows = table.rows || [];
-      if (!rows.length) return "";
+      if (!rows.length) return { period: "", mode: "" };
       const dateColumns = getFlexibleScheduleDateColumns(table);
-      if (!dateColumns.length) return getDetailedSchedulePeriod(table);
+      if (!dateColumns.length) {
+        const fallback = getDetailedSchedulePeriod(table);
+        return { period: fallback, mode: fallback ? "逐日细排" : "" };
+      }
       const maxDateHeaderRow = Math.max(...dateColumns.map((item) => item.headerRowIndex || 0));
       const dataStartRow = Math.max(headerRowIndex + 1, maxDateHeaderRow + 1, TIME_SLOT_DETECT_START_ROW_NUMBER - 1);
-      const dateItems = [];
+      const dailyItems = [];
       dateColumns.forEach((dateColumn) => {
         for (let rowIndex = dataStartRow; rowIndex < rows.length; rowIndex += 1) {
           if (isTimeSlotDetailRow(rowIndex)) continue;
           const row = rows[rowIndex] || [];
           if (!isSchedulePoint(row[dateColumn.colIndex])) continue;
-          dateItems.push(dateColumn);
+          dailyItems.push(dateColumn);
           break;
         }
       });
-      if (!dateItems.length) return getDetailedSchedulePeriod(table);
+      const mergedItems = getMergedScheduleDateItems(table, dateColumns, dataStartRow);
+      const dateItems = [...dailyItems, ...mergedItems.flatMap((item) => [item.start, item.end])];
+      if (!dateItems.length) {
+        const fallback = getDetailedSchedulePeriod(table);
+        return { period: fallback, mode: fallback ? "逐日细排" : "" };
+      }
       dateItems.sort((a, b) => a.date - b.date);
-      return formatScheduleDateRange(dateItems[0], dateItems[dateItems.length - 1]);
+      const mode = mergedItems.length && dailyItems.length
+        ? "混合模式"
+        : mergedItems.length
+          ? "周期内拉通"
+          : "逐日细排";
+      return {
+        period: formatScheduleDateRange(dateItems[0], dateItems[dateItems.length - 1]),
+        mode
+      };
+    }
+
+    function getMergedScheduleDateItems(table, dateColumns, dataStartRow) {
+      const rows = table.rows || [];
+      const dateByCol = new Map(dateColumns.map((item) => [item.colIndex, item]));
+      return (table.merges || []).map((merge) => {
+        if (!merge || merge.e.c <= merge.s.c) return null;
+        if (merge.s.r < dataStartRow || isTimeSlotDetailRow(merge.s.r)) return null;
+        const row = rows[merge.s.r] || [];
+        if (!isSchedulePoint(row[merge.s.c])) return null;
+        const coveredDates = [];
+        for (let colIndex = merge.s.c; colIndex <= merge.e.c; colIndex += 1) {
+          const dateInfo = dateByCol.get(colIndex);
+          if (dateInfo) coveredDates.push(dateInfo);
+        }
+        if (!coveredDates.length) return null;
+        coveredDates.sort((a, b) => a.date - b.date);
+        return {
+          start: coveredDates[0],
+          end: coveredDates[coveredDates.length - 1],
+          anchorRow: merge.s.r,
+          anchorCol: merge.s.c
+        };
+      }).filter(Boolean);
     }
 
     function getFlexibleScheduleDateColumns(table) {
@@ -2364,7 +2419,7 @@
 
     function buildScheduleValuesLine(schedules) {
       return schedules.map((item) => (
-        `${item.label}：整单周期${item.period || "待人工确认"}，整单金额${item.amount != null ? formatCurrency(item.amount) : "待人工确认"}`
+        `${item.label}：整单周期${item.period || "待人工确认"}，整单金额${item.amount != null ? formatCurrency(item.amount) : "待人工确认"}${item.flightingMode ? `，细排模式${item.flightingMode}` : ""}`
       )).join("\n");
     }
 
