@@ -358,6 +358,24 @@
       margin-bottom: 14px;
     }
 
+    .settlement-insight {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .settlement-party-summary {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .settlement-party-summary .metric-value {
+      font-size: 18px;
+      line-height: 1.25;
+      word-break: break-word;
+    }
+
     .metric {
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -890,6 +908,8 @@
             </div>
           </div>
 
+          <div class="settlement-insight hidden" id="settlementInsight"></div>
+
           <div id="emptyState" class="empty-state">
             <div>
               <strong>等待核对</strong>
@@ -1004,6 +1024,7 @@
     const appTitle = document.querySelector("#appTitle");
     const toolNoticeArea = document.querySelector("#toolNoticeArea");
     const brandSummaryPanel = document.querySelector("#brandSummaryPanel");
+    const settlementInsight = document.querySelector("#settlementInsight");
     const adjustmentScenarioPreview = document.querySelector("#adjustmentScenarioPreview");
     const adjustmentVolumePreview = document.querySelector("#adjustmentVolumePreview");
     const brandToolTab = document.querySelector("#brandToolTab");
@@ -1667,6 +1688,7 @@
       renderAbnormalFields();
       renderToolNotice();
       renderBrandSummary();
+      renderSettlementInsight();
       renderAdjustmentScenarioPreview();
       setStatus(state.activeTool === "brand" ? "核对完成" : state.activeTool === "settlement" ? "实际结算识别完成" : "识别完成", getCompletionStatusTone(checked));
       updateReadyState();
@@ -2046,6 +2068,8 @@
       if ((text.includes("orderitem id") || text.includes("订单项id")) && (text.includes("折后单价") || text.includes("unit price after discount"))) return "green";
       if ((compactText.includes("orderitemid") || text.includes("订单项id")) && (compactText.includes("unitpriceafterdiscount") || text.includes("折后单价"))) return "green";
       if ((text.includes("购买数量") || text.includes("purchased quantity") || compactText.includes("contractamount")) && (text.includes("购买总价") || text.includes("purchased total") || compactText.includes("totalnetprice")) && (text.includes("periods") || text.includes("投放周期") || fileName.includes("执行"))) return "execution";
+      if (compactText.includes("totalnetcost") && (compactText.includes("totalimp") || compactText.includes("netcostcpm") || compactText.includes("mediaschedule") || compactText.includes("campaign"))) return "client";
+      if (compactText.includes("period") && compactText.includes("totalnetcost") && !compactText.includes("orderitemid")) return "client";
       if (compactText.includes("costperbuying") && compactText.includes("totalpackagenet") && compactText.includes("count")) return "client";
       if ((compactText.includes("quantity") || compactText.includes("count") || text.includes("数量")) && (compactText.includes("totalnetcost") || compactText.includes("totalpackagenet") || compactText.includes("totalnetprice") || compactText.includes("nettotal") || compactText.includes("paidtotal") || compactText.includes("payableamount") || text.includes("净价") || text.includes("净额"))) return "client";
       if (fileName.includes("绿排期") || fileName.includes("订单排期")) return "green";
@@ -2073,31 +2097,36 @@
       const amount = firstValue([client.amount, execution.amount, green.amount]);
       const baseLine = `实际结算：整单周期${period || "待人工确认"}，整单金额${amount != null ? formatCurrency(amount) : "待人工确认"}`;
       const netPriceLine = netPriceYellowFields.length ? "净单价变化，请人工复核" : "";
+      const parties = extractSettlementParties(execution.record && execution.record.table);
 
       if (netPriceLine) {
         return {
           status: "bad",
-          message: [netPriceLine, baseLine, buildScheduleValuesLine(schedules)].filter(Boolean).join("\n")
+          message: [netPriceLine, baseLine, buildScheduleValuesLine(schedules)].filter(Boolean).join("\n"),
+          parties
         };
       }
 
       if (!infoOk) {
         return {
           status: "bad",
-          message: ["实际结算机审不通过。", buildScheduleValuesLine(schedules)].filter(Boolean).join("\n")
+          message: ["实际结算机审不通过。", buildScheduleValuesLine(schedules)].filter(Boolean).join("\n"),
+          parties
         };
       }
 
       if (!executionConsistency.ok) {
         return {
           status: "warn",
-          message: [baseLine, executionConsistency.message].filter(Boolean).join("\n")
+          message: [baseLine, executionConsistency.message].filter(Boolean).join("\n"),
+          parties
         };
       }
 
       return {
         status: "ok",
-        message: baseLine
+        message: `${baseLine}，三个排期信息一致`,
+        parties
       };
     }
 
@@ -2119,16 +2148,31 @@
       const headerRowIndex = findBestHeaderRow(table);
       const header = getCombinedHeader(table, headerRowIndex);
       const isClient = label === "客户排期";
+      const isExecution = label === "执行排期";
+      const isGreen = label === "绿排期";
       const quantityCandidates = isClient
-        ? ["count", "paid quantity", "purchased quantity", "quantity", "qty", "购买数量", "购买总量", "总数量", "数量", "contract amount"]
+        ? ["total imp 000", "total imp", "total impressions", "impressions", "count", "paid quantity", "purchased quantity", "quantity", "qty", "购买数量", "购买总量", "总数量", "数量", "contract amount"]
         : ["contract amount", "购买数量", "purchased quantity", "quantity", "amount", "数量"];
       const amountCandidates = isClient
         ? ["total package net", "total net cost", "total net price", "net total", "paid total", "payable amount", "折后净总价", "总净价", "净总价", "实付总金额", "实结金额", "投放金额", "购买总价", "折后总价", "合同金额", "净额", "金额"]
-        : ["total price after discount", "total net price", "购买总价", "total net cost", "purchased total", "total cost", "net payable", "actual paid", "折后总价", "金额", "净额"];
+        : isExecution
+          ? ["购买总价", "购买总价￥", "购买总价元", "total net price"]
+          : isGreen
+            ? ["购买总价", "购买总价￥", "购买总价元", "total net price"]
+          : ["购买总价", "total net cost", "purchased total", "net payable", "actual paid", "金额", "净额"];
       const quantityCol = findHeaderColumn(header, quantityCandidates);
       const amountCol = findHeaderColumn(header, amountCandidates);
       if (quantityCol >= 0) result.quantity = readTotalOrSum(table, headerRowIndex, quantityCol);
       if (amountCol >= 0) result.amount = readTotalOrSum(table, headerRowIndex, amountCol);
+      if (isGreen && result.amount == null) {
+        const greenFallbackAmountCol = findHeaderColumn(header, ["total price after discount", "折后总价", "折后总价￥", "折后总价元"]);
+        if (greenFallbackAmountCol >= 0) {
+          result.amount = readTotalOrSum(table, headerRowIndex, greenFallbackAmountCol);
+          if (result.amount != null) result.amountNote = "按折后总价明细汇总";
+        }
+      }
+      if (isExecution && amountCol < 0) result.amountNote = "缺少购买总价字段";
+      if (isGreen && result.amount == null) result.amountNote = "缺少可汇总金额字段";
       const detail = getSettlementDetailedSchedulePeriod(table, headerRowIndex);
       result.detailPeriod = detail.period || "";
       result.flightingMode = detail.mode || "";
@@ -2136,6 +2180,39 @@
       result.filePeriod = findPeriodInText(record.file.name);
       result.period = firstValue([result.detailPeriod, result.headerPeriod, result.filePeriod]);
       return result;
+    }
+
+    function extractSettlementParties(table) {
+      const result = {
+        advertiser: "待人工确认",
+        signatory: "待人工确认"
+      };
+      if (!table) return result;
+      const rows = (table.rows || []).slice(0, 12);
+      const advertiser = findNearbyLabeledValue(rows, ["advertiser", "client", "广告主", "客户"]);
+      const signatory = findNearbyLabeledValue(rows, ["signatory", "contracting party", "contract party", "agent", "签约方", "代理公司", "代理"]);
+      if (advertiser) result.advertiser = advertiser;
+      if (signatory) result.signatory = signatory;
+      return result;
+    }
+
+    function findNearbyLabeledValue(rows, labels) {
+      for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+        const row = rows[rowIndex] || [];
+        for (let colIndex = 0; colIndex < row.length; colIndex += 1) {
+          const cellText = normalizeCell(row[colIndex]);
+          const normalized = normalizeForList(cellText).toLowerCase();
+          const matched = labels.some((label) => normalized.includes(normalizeForList(label).toLowerCase()));
+          if (!matched) continue;
+          const inline = cellText.split(/[：:]/).slice(1).join(":").trim();
+          if (inline) return inline;
+          for (let nextCol = colIndex + 1; nextCol < Math.min(row.length, colIndex + 5); nextCol += 1) {
+            const value = normalizeCell(row[nextCol]);
+            if (value) return value;
+          }
+        }
+      }
+      return "";
     }
 
     function findBestHeaderRow(table) {
@@ -2419,8 +2496,12 @@
 
     function buildScheduleValuesLine(schedules) {
       return schedules.map((item) => (
-        `${item.label}：整单周期${item.period || "待人工确认"}，整单金额${item.amount != null ? formatCurrency(item.amount) : "待人工确认"}${item.flightingMode ? `，细排模式${item.flightingMode}` : ""}`
+        formatScheduleBusinessLine(item)
       )).join("\n");
+    }
+
+    function formatScheduleBusinessLine(item) {
+      return `${item.label}：整单周期${item.period || "待人工确认"}，整单金额${item.amount != null ? formatCurrency(item.amount) : "待人工确认"}`;
     }
 
     function firstValue(values) {
@@ -3013,17 +3094,18 @@
         emptyState.classList.remove("hidden");
         resultWrap.classList.add("hidden");
         renderResultEmptyState();
+        renderSettlementInsight();
         renderToolNotice();
         return;
       }
 
       emptyState.classList.add("hidden");
-      resultWrap.classList.remove("hidden");
-      resultBody.innerHTML = state.results.map((item) => {
-        if (item.settlementSummary) {
-          const toneClass = item.status === "bad" ? "danger-summary" : item.status === "warn" ? "warn-summary" : "";
-          return `<tr><td colspan="8"><div class="no-change-result settlement-result ${toneClass}">${renderMultilineText(item.message)}</div></td></tr>`;
-        }
+      renderSettlementInsight();
+      const visibleResults = state.activeTool === "settlement"
+        ? state.results.filter((item) => !item.settlementSummary)
+        : state.results;
+      resultWrap.classList.toggle("hidden", !visibleResults.length);
+      resultBody.innerHTML = visibleResults.map((item) => {
         if (item.noChange) {
           return `<tr><td colspan="8"><div class="no-change-message">${escapeHtml(item.message)}</div></td></tr>`;
         }
@@ -3041,6 +3123,32 @@
         </tr>
       `;
       }).join("");
+    }
+
+    function renderSettlementInsight() {
+      if (!settlementInsight) return;
+      const settlement = state.activeTool === "settlement" ? state.settlementSummary : null;
+      if (!settlement) {
+        settlementInsight.classList.add("hidden");
+        settlementInsight.innerHTML = "";
+        return;
+      }
+      const toneClass = settlement.status === "bad" ? "danger-summary" : settlement.status === "warn" ? "warn-summary" : "";
+      const parties = settlement.parties || {};
+      settlementInsight.classList.remove("hidden");
+      settlementInsight.innerHTML = `
+        <div class="settlement-party-summary">
+          <div class="metric">
+            <div class="metric-value">${escapeHtml(parties.advertiser || "待人工确认")}</div>
+            <div class="metric-label">执行排期广告主</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value">${escapeHtml(parties.signatory || "待人工确认")}</div>
+            <div class="metric-label">执行排期签约方</div>
+          </div>
+        </div>
+        <div class="no-change-result settlement-result ${toneClass}">${renderMultilineText(settlement.message)}</div>
+      `;
     }
 
     function renderMultilineText(value) {
