@@ -942,7 +942,7 @@
   <script>
     const FIXED_RULES = [
       "检测 D 列为品牌时刻且 H 列广告时长为 15s 的行，AJ 列是否标黄，且赋值必须与识别节目对应的“(反)剧名”完全一致，不能多、不能少、不能出现“(正)”。",
-      "忽略 BW 列标黄、以及 CA 列标黄且赋值为 0 的单元格，检测是否有其他单元格标黄。"
+      "通用忽略字段仅包含 BW 列、CA 列标黄且赋值为 0 的单元格、PMP信息；检测其他所有标黄字段。"
     ];
     const COL_D = 3;
     const COL_H = 7;
@@ -1252,6 +1252,7 @@
                     rowIndex: r,
                     colIndex: c,
                     value,
+                    formula: cell && cell.f ? String(cell.f) : "",
                     yellow: isYellowCell(cell),
                     style: cell && cell.s ? cell.s : null
                   };
@@ -1825,6 +1826,7 @@
 
             cells.forEach((cell, colIndex) => {
               if (!cell || !cell.yellow) return;
+              if (isBrandAjHandledByDedicatedRule(colIndex, row)) return;
               if (shouldIgnoreYellowCell(colIndex, cell, row, fieldRow)) return;
 
               abnormalFields.push({
@@ -2071,6 +2073,7 @@
       if (compactText.includes("totalnetcost") && (compactText.includes("totalimp") || compactText.includes("netcostcpm") || compactText.includes("mediaschedule") || compactText.includes("campaign"))) return "client";
       if (compactText.includes("period") && compactText.includes("totalnetcost") && !compactText.includes("orderitemid")) return "client";
       if (compactText.includes("costperbuying") && compactText.includes("totalpackagenet") && compactText.includes("count")) return "client";
+      if (compactText.includes("投放月份") && compactText.includes("投放量") && compactText.includes("净总价")) return "client";
       if ((compactText.includes("quantity") || compactText.includes("count") || text.includes("数量")) && (compactText.includes("totalnetcost") || compactText.includes("totalpackagenet") || compactText.includes("totalnetprice") || compactText.includes("nettotal") || compactText.includes("paidtotal") || compactText.includes("payableamount") || text.includes("净价") || text.includes("净额"))) return "client";
       if (fileName.includes("绿排期") || fileName.includes("订单排期")) return "green";
       if (fileName.includes("执行")) return "execution";
@@ -2098,6 +2101,14 @@
       const baseLine = `实际结算：整单周期${period || "待人工确认"}，整单金额${amount != null ? formatCurrency(amount) : "待人工确认"}`;
       const netPriceLine = netPriceYellowFields.length ? "净单价变化，请人工复核" : "";
       const parties = extractSettlementParties(execution.record && execution.record.table);
+
+      if (netPriceLine && infoOk) {
+        return {
+          status: "bad",
+          message: [netPriceLine, `${baseLine}，三个排期信息一致`].filter(Boolean).join("\n"),
+          parties
+        };
+      }
 
       if (netPriceLine) {
         return {
@@ -2151,7 +2162,7 @@
       const isExecution = label === "执行排期";
       const isGreen = label === "绿排期";
       const quantityCandidates = isClient
-        ? ["total imp 000", "total imp", "total impressions", "impressions", "count", "paid quantity", "purchased quantity", "quantity", "qty", "购买数量", "购买总量", "总数量", "数量", "contract amount"]
+        ? ["total imp 000", "total imp", "total impressions", "impressions", "count", "paid quantity", "purchased quantity", "quantity", "qty", "购买数量", "购买总量", "总数量", "数量", "投放量", "contract amount"]
         : ["contract amount", "购买数量", "purchased quantity", "quantity", "amount", "数量"];
       const amountCandidates = isClient
         ? ["total package net", "total net cost", "total net price", "net total", "paid total", "payable amount", "折后净总价", "总净价", "净总价", "实付总金额", "实结金额", "投放金额", "购买总价", "折后总价", "合同金额", "净额", "金额"]
@@ -2162,8 +2173,12 @@
           : ["购买总价", "total net cost", "purchased total", "net payable", "actual paid", "金额", "净额"];
       const quantityCol = findHeaderColumn(header, quantityCandidates);
       const amountCol = findHeaderColumn(header, amountCandidates);
-      if (quantityCol >= 0) result.quantity = readTotalOrSum(table, headerRowIndex, quantityCol);
-      if (amountCol >= 0) result.amount = readTotalOrSum(table, headerRowIndex, amountCol);
+      if (quantityCol >= 0) result.quantity = isClient
+        ? readClientTotalOrSum(table, headerRowIndex, quantityCol)
+        : readTotalOrSum(table, headerRowIndex, quantityCol);
+      if (amountCol >= 0) result.amount = isClient
+        ? readClientTotalOrSum(table, headerRowIndex, amountCol)
+        : readTotalOrSum(table, headerRowIndex, amountCol);
       if (isGreen && result.amount == null) {
         const greenFallbackAmountCol = findHeaderColumn(header, ["total price after discount", "折后总价", "折后总价￥", "折后总价元"]);
         if (greenFallbackAmountCol >= 0) {
@@ -2173,7 +2188,12 @@
       }
       if (isExecution && amountCol < 0) result.amountNote = "缺少购买总价字段";
       if (isGreen && result.amount == null) result.amountNote = "缺少可汇总金额字段";
-      const detail = getSettlementDetailedSchedulePeriod(table, headerRowIndex);
+      // Alternating time-slot rows are a green-schedule convention, not an execution-schedule rule.
+      const detail = getSettlementDetailedSchedulePeriod(table, headerRowIndex, {
+        skipTimeSlotRows: isGreen,
+        minimumDataRow: isClient ? 0 : TIME_SLOT_DETECT_START_ROW_NUMBER - 1,
+        referenceYearMonth: isClient ? findClientScheduleYearMonth(table) : null
+      });
       result.detailPeriod = detail.period || "";
       result.flightingMode = detail.mode || "";
       result.headerPeriod = findHeaderPeriodInTable(table);
@@ -2277,6 +2297,20 @@
       return values.reduce((sum, value) => sum + value, 0);
     }
 
+    function readClientTotalOrSum(table, headerRowIndex, colIndex) {
+      const rows = table.rows || [];
+      const cells = table.cells || [];
+      const column = columnName(colIndex);
+      const sameColumnSum = new RegExp(`SUM\\([^)]*${column}\\d+\\s*:\\s*${column}\\d+`, "i");
+      for (let rowIndex = rows.length - 1; rowIndex > headerRowIndex; rowIndex -= 1) {
+        const meta = cells[rowIndex] && cells[rowIndex][colIndex];
+        const formula = normalizeCell(meta && meta.formula);
+        const value = parseStrictAmount(rows[rowIndex] && rows[rowIndex][colIndex]);
+        if (value != null && formula && sameColumnSum.test(formula)) return value;
+      }
+      return readTotalOrSum(table, headerRowIndex, colIndex);
+    }
+
     function parseStrictAmount(value) {
       const rawText = normalizeCell(value);
       if (!rawText || rawText.trim().startsWith("=")) return null;
@@ -2288,10 +2322,12 @@
       return Number.isFinite(number) ? number : null;
     }
 
-    function getDetailedSchedulePeriod(table) {
+    function getDetailedSchedulePeriod(table, options = {}) {
+      const skipTimeSlotRows = Boolean(options.skipTimeSlotRows);
       const rowIndexes = [];
       (table.rows || []).forEach((row, rowIndex) => {
-        if (rowIndex < TIME_SLOT_DETECT_START_ROW_NUMBER - 1 || isTimeSlotDetailRow(rowIndex)) return;
+        if (rowIndex < TIME_SLOT_DETECT_START_ROW_NUMBER - 1) return;
+        if (skipTimeSlotRows && isTimeSlotDetailRow(rowIndex)) return;
         rowIndexes.push(rowIndex);
       });
       const dateItems = [];
@@ -2308,30 +2344,38 @@
       return formatScheduleDateRange(dateItems[0], dateItems[dateItems.length - 1]);
     }
 
-    function getSettlementDetailedSchedulePeriod(table, headerRowIndex) {
+    function getSettlementDetailedSchedulePeriod(table, headerRowIndex, options = {}) {
+      const skipTimeSlotRows = Boolean(options.skipTimeSlotRows);
+      const minimumDataRow = Number.isFinite(options.minimumDataRow)
+        ? options.minimumDataRow
+        : TIME_SLOT_DETECT_START_ROW_NUMBER - 1;
       const rows = table.rows || [];
       if (!rows.length) return { period: "", mode: "" };
-      const dateColumns = getFlexibleScheduleDateColumns(table);
+      const dateColumns = getFlexibleScheduleDateColumns(table, {
+        referenceYearMonth: options.referenceYearMonth || null
+      });
       if (!dateColumns.length) {
-        const fallback = getDetailedSchedulePeriod(table);
+        const fallback = getDetailedSchedulePeriod(table, { skipTimeSlotRows });
         return { period: fallback, mode: fallback ? "逐日细排" : "" };
       }
       const maxDateHeaderRow = Math.max(...dateColumns.map((item) => item.headerRowIndex || 0));
-      const dataStartRow = Math.max(headerRowIndex + 1, maxDateHeaderRow + 1, TIME_SLOT_DETECT_START_ROW_NUMBER - 1);
+      const dataStartRow = Math.max(headerRowIndex + 1, maxDateHeaderRow + 1, minimumDataRow);
       const dailyItems = [];
       dateColumns.forEach((dateColumn) => {
         for (let rowIndex = dataStartRow; rowIndex < rows.length; rowIndex += 1) {
-          if (isTimeSlotDetailRow(rowIndex)) continue;
+          if (skipTimeSlotRows && isTimeSlotDetailRow(rowIndex)) continue;
           const row = rows[rowIndex] || [];
           if (!isSchedulePoint(row[dateColumn.colIndex])) continue;
           dailyItems.push(dateColumn);
           break;
         }
       });
-      const mergedItems = getMergedScheduleDateItems(table, dateColumns, dataStartRow);
+      const mergedItems = getMergedScheduleDateItems(table, dateColumns, dataStartRow, {
+        skipTimeSlotRows
+      });
       const dateItems = [...dailyItems, ...mergedItems.flatMap((item) => [item.start, item.end])];
       if (!dateItems.length) {
-        const fallback = getDetailedSchedulePeriod(table);
+        const fallback = getDetailedSchedulePeriod(table, { skipTimeSlotRows });
         return { period: fallback, mode: fallback ? "逐日细排" : "" };
       }
       dateItems.sort((a, b) => a.date - b.date);
@@ -2346,12 +2390,14 @@
       };
     }
 
-    function getMergedScheduleDateItems(table, dateColumns, dataStartRow) {
+    function getMergedScheduleDateItems(table, dateColumns, dataStartRow, options = {}) {
+      const skipTimeSlotRows = Boolean(options.skipTimeSlotRows);
       const rows = table.rows || [];
       const dateByCol = new Map(dateColumns.map((item) => [item.colIndex, item]));
       return (table.merges || []).map((merge) => {
         if (!merge || merge.e.c <= merge.s.c) return null;
-        if (merge.s.r < dataStartRow || isTimeSlotDetailRow(merge.s.r)) return null;
+        if (merge.s.r < dataStartRow) return null;
+        if (skipTimeSlotRows && isTimeSlotDetailRow(merge.s.r)) return null;
         const row = rows[merge.s.r] || [];
         if (!isSchedulePoint(row[merge.s.c])) return null;
         const coveredDates = [];
@@ -2370,20 +2416,23 @@
       }).filter(Boolean);
     }
 
-    function getFlexibleScheduleDateColumns(table) {
+    function getFlexibleScheduleDateColumns(table, options = {}) {
       const rows = table.rows || [];
       const headerPeriod = findHeaderPeriodInTable(table);
-      const years = extractYearsFromPeriodText(headerPeriod || flattenTableText(table).slice(0, 800));
+      const referenceYearMonth = options.referenceYearMonth || null;
+      const years = referenceYearMonth
+        ? [referenceYearMonth.year]
+        : extractYearsFromPeriodText(headerPeriod || flattenTableText(table).slice(0, 800));
       const maxCols = Math.max(...rows.map((row) => row.length), 1);
       const dateColumns = [];
       for (let colIndex = 0; colIndex < maxCols; colIndex += 1) {
-        const dateItem = getFlexibleDateInfoForColumn(rows, colIndex, years);
+        const dateItem = getFlexibleDateInfoForColumn(rows, colIndex, years, referenceYearMonth);
         if (dateItem) dateColumns.push(dateItem);
       }
       return dateColumns;
     }
 
-    function getFlexibleDateInfoForColumn(rows, colIndex, years) {
+    function getFlexibleDateInfoForColumn(rows, colIndex, years, referenceYearMonth = null) {
       for (let rowIndex = 0; rowIndex < Math.min(15, rows.length); rowIndex += 1) {
         const direct = parseSingleDate(normalizeCell(rows[rowIndex] && rows[rowIndex][colIndex]));
         if (direct) return { ...direct, colIndex, headerRowIndex: rowIndex };
@@ -2391,7 +2440,11 @@
       for (let monthRowIndex = 0; monthRowIndex < Math.min(15, rows.length); monthRowIndex += 1) {
         let currentMonthInfo = null;
         for (let index = 0; index <= colIndex; index += 1) {
-          currentMonthInfo = parseScheduleMonthFlexible(rows[monthRowIndex] && rows[monthRowIndex][index], years) || currentMonthInfo;
+          currentMonthInfo = parseScheduleMonthFlexible(
+            rows[monthRowIndex] && rows[monthRowIndex][index],
+            years,
+            referenceYearMonth
+          ) || currentMonthInfo;
         }
         if (!currentMonthInfo) continue;
         for (const dayOffset of [1, 2]) {
@@ -2430,10 +2483,18 @@
       return years.length ? Array.from(new Set(years)) : [new Date().getFullYear()];
     }
 
-    function parseScheduleMonthFlexible(value, years) {
+    function parseScheduleMonthFlexible(value, years, referenceYearMonth = null) {
       const strict = parseScheduleMonth(value);
       if (strict) return strict;
       const text = normalizeCell(value);
+      const chineseMatch = normalizeForList(text).match(/^(\d{1,2})月份?(?:投放)?(?:周期|排期)?$/);
+      if (chineseMatch) {
+        const month = Number(chineseMatch[1]);
+        if (month < 1 || month > 12) return null;
+        if (referenceYearMonth && referenceYearMonth.month !== month) return null;
+        const year = referenceYearMonth ? referenceYearMonth.year : years[0];
+        return year ? { year, month } : null;
+      }
       const match = text.match(/^([A-Za-z]{3,9})\.?$/);
       if (!match) return null;
       const monthMap = {
@@ -2453,6 +2514,36 @@
       const month = monthMap[match[1].toLowerCase()];
       if (!month) return null;
       return { year: years[0], month };
+    }
+
+    function findClientScheduleYearMonth(table) {
+      const rows = table.rows || [];
+      const maxRows = Math.min(rows.length, 12);
+      for (let rowIndex = 0; rowIndex < maxRows; rowIndex += 1) {
+        const row = rows[rowIndex] || [];
+        for (let colIndex = 0; colIndex < row.length; colIndex += 1) {
+          if (!normalizeForList(row[colIndex]).includes("投放月份")) continue;
+          for (let nextRow = rowIndex + 1; nextRow < Math.min(rows.length, rowIndex + 8); nextRow += 1) {
+            const parsed = parseClientScheduleMonthEvidence(rows[nextRow] && rows[nextRow][colIndex]);
+            if (parsed) return parsed;
+          }
+        }
+      }
+      return null;
+    }
+
+    function parseClientScheduleMonthEvidence(value) {
+      const text = normalizeCell(value);
+      if (!text) return null;
+      const serial = Number(text.replace(/,/g, ""));
+      if (Number.isFinite(serial) && serial >= 30000 && serial <= 60000) {
+        const milliseconds = Date.UTC(1899, 11, 30) + Math.floor(serial) * 86400000;
+        const date = new Date(milliseconds);
+        return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1 };
+      }
+      const match = text.match(/(20\d{2})[\u5e74\/.-](\d{1,2})月?/);
+      if (!match) return null;
+      return { year: Number(match[1]), month: Number(match[2]) };
     }
 
     function findHeaderPeriodInTable(table) {
@@ -3034,8 +3125,11 @@
       if (isPmpInfoField(fieldRow, colIndex)) return true;
       if (colIndex === COL_BW) return true;
       if (colIndex === COL_CA && normalizeZero(cell.value)) return true;
-      if (colIndex === COL_AJ && is15sBrandMomentRow(row)) return true;
       return false;
+    }
+
+    function isBrandAjHandledByDedicatedRule(colIndex, row) {
+      return colIndex === COL_AJ && is15sBrandMomentRow(row);
     }
 
     function isPmpInfoField(fieldRow, colIndex) {
