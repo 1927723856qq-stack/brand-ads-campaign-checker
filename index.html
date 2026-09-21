@@ -802,18 +802,6 @@
             <div id="programPreview" class="preview">粘贴四列表格后，将在这里显示第二列“节目”的剧名。</div>
           </div>
 
-          <div class="adjustment-summary-grid adjustment-only hidden">
-            <div class="field">
-              <label>检测到改单场景</label>
-              <div id="adjustmentScenarioPreview" class="preview scenario-preview">上传绿排期并识别后，将在这里显示检测到的改单场景。</div>
-            </div>
-
-            <div class="field">
-              <label>检测到预定量调整</label>
-              <div id="adjustmentVolumePreview" class="preview scenario-preview">预定量有调整时，将在这里显示预定量和购买量比例。</div>
-            </div>
-          </div>
-
         </div>
       </aside>
 
@@ -905,6 +893,18 @@
             <div class="metric">
               <div class="metric-value" id="failCount">0</div>
               <div class="metric-label" id="failCountLabel">异常行数</div>
+            </div>
+          </div>
+
+          <div class="adjustment-summary-grid adjustment-only hidden">
+            <div class="field">
+              <label>检测到改单场景</label>
+              <div id="adjustmentScenarioPreview" class="preview scenario-preview">上传绿排期并识别后，将在这里显示检测到的改单场景。</div>
+            </div>
+
+            <div class="field">
+              <label>检测到预定量调整</label>
+              <div id="adjustmentVolumePreview" class="preview scenario-preview">预定量有调整时，将在这里显示预定量和购买量比例。</div>
             </div>
           </div>
 
@@ -1090,8 +1090,8 @@
       brandToolTab.classList.toggle("active", tool === "brand");
       adjustmentToolTab.classList.toggle("active", tool === "adjustment");
       settlementToolTab.classList.toggle("active", tool === "settlement");
-      configPanel.classList.toggle("is-wide", tool === "adjustment");
-      configPanel.classList.toggle("hidden", tool === "settlement");
+      configPanel.classList.remove("is-wide");
+      configPanel.classList.toggle("hidden", tool !== "brand");
       document.querySelectorAll(".brand-only").forEach((node) => {
         node.classList.toggle("hidden", tool !== "brand");
       });
@@ -2055,11 +2055,92 @@
     }
 
     function classifySettlementRecords(records) {
-      return records.reduce((groups, record) => {
+      const groups = records.reduce((result, record) => {
         const role = classifySettlementRecord(record);
-        if (role) groups[role].push(record);
-        return groups;
+        if (role) result[role].push(record);
+        return result;
       }, { client: [], execution: [], green: [], unknown: [] });
+      return preserveIdenticalClientExecutionRecords(groups);
+    }
+
+    function preserveIdenticalClientExecutionRecords(groups) {
+      if (groups.client.length && groups.execution.length) {
+        groups.clientExecutionIdentical = recordsHaveIdenticalBusinessContent(groups.client[0], groups.execution[0]);
+        return groups;
+      }
+
+      if (!groups.client.length && groups.execution.length >= 2) {
+        const pair = findIdenticalExecutionTemplatePair(groups.execution);
+        if (pair) {
+          groups.client = [pair.client];
+          groups.execution = [pair.execution, ...groups.execution.filter((record) => record !== pair.client && record !== pair.execution)];
+          groups.clientExecutionIdentical = true;
+          return groups;
+        }
+      }
+
+      groups.clientExecutionIdentical = false;
+      return groups;
+    }
+
+    function findIdenticalExecutionTemplatePair(records) {
+      for (let leftIndex = 0; leftIndex < records.length; leftIndex += 1) {
+        for (let rightIndex = leftIndex + 1; rightIndex < records.length; rightIndex += 1) {
+          const left = records[leftIndex];
+          const right = records[rightIndex];
+          if (left.file === right.file) continue;
+          if (!recordsHaveIdenticalBusinessContent(left, right)) continue;
+          const leftExplicitExecution = isExplicitExecutionFile(left.file.name);
+          const rightExplicitExecution = isExplicitExecutionFile(right.file.name);
+          if (leftExplicitExecution && !rightExplicitExecution) return { client: right, execution: left };
+          if (rightExplicitExecution && !leftExplicitExecution) return { client: left, execution: right };
+          return { client: left, execution: right };
+        }
+      }
+      return null;
+    }
+
+    function isExplicitExecutionFile(fileName) {
+      return normalizeForList(fileName).toLowerCase().includes("执行");
+    }
+
+    function recordsHaveIdenticalBusinessContent(left, right) {
+      if (!left || !right) return false;
+      return getTableBusinessSignature(left.table) === getTableBusinessSignature(right.table);
+    }
+
+    function getTableBusinessSignature(table) {
+      if (!table) return "";
+      const rows = table.rows || [];
+      const cells = table.cells || [];
+      let lastRow = -1;
+      let lastCol = -1;
+      rows.forEach((row, rowIndex) => {
+        (row || []).forEach((value, colIndex) => {
+          const formula = normalizeCell(cells[rowIndex] && cells[rowIndex][colIndex] && cells[rowIndex][colIndex].formula);
+          if (!normalizeCell(value) && !formula) return;
+          lastRow = Math.max(lastRow, rowIndex);
+          lastCol = Math.max(lastCol, colIndex);
+        });
+      });
+      if (lastRow < 0 || lastCol < 0) return "";
+
+      const usedCells = [];
+      for (let rowIndex = 0; rowIndex <= lastRow; rowIndex += 1) {
+        const row = [];
+        for (let colIndex = 0; colIndex <= lastCol; colIndex += 1) {
+          const meta = cells[rowIndex] && cells[rowIndex][colIndex];
+          row.push([
+            normalizeCell(rows[rowIndex] && rows[rowIndex][colIndex]),
+            normalizeCell(meta && meta.formula)
+          ]);
+        }
+        usedCells.push(row);
+      }
+      const merges = (table.merges || [])
+        .map((merge) => [merge.s.r, merge.s.c, merge.e.r, merge.e.c])
+        .sort((left, right) => left.join(",").localeCompare(right.join(",")));
+      return JSON.stringify({ usedCells, merges });
     }
 
     function classifySettlementRecord(record) {
@@ -2090,6 +2171,17 @@
       const client = extractSettlementControls(classified.client[0], "客户排期");
       const execution = extractSettlementControls(classified.execution[0], "执行排期");
       const green = extractSettlementControls(classified.green[0], "绿排期");
+      const clientExecutionIdentical = Boolean(
+        classified.clientExecutionIdentical && client.record && execution.record
+      );
+      if (clientExecutionIdentical) {
+        client.quantity = execution.quantity;
+        client.amount = execution.amount;
+        client.period = execution.period;
+        client.detailPeriod = execution.detailPeriod;
+        client.headerPeriod = execution.headerPeriod;
+        client.flightingMode = execution.flightingMode;
+      }
       const schedules = [client, execution, green];
       const infoOk = schedules.every((item) => item.record && item.quantity != null && item.amount != null && item.period)
         && valuesSame(schedules.map((item) => item.quantity))
@@ -2105,7 +2197,9 @@
       if (netPriceLine && infoOk) {
         return {
           status: "bad",
-          message: [netPriceLine, `${baseLine}，三个排期信息一致`].filter(Boolean).join("\n"),
+          message: clientExecutionIdentical
+            ? [netPriceLine, buildIdenticalClientExecutionLines(`${baseLine}，三个排期信息一致`, execution, green)].join("\n")
+            : [netPriceLine, `${baseLine}，三个排期信息一致`].filter(Boolean).join("\n"),
           parties
         };
       }
@@ -2113,7 +2207,12 @@
       if (netPriceLine) {
         return {
           status: "bad",
-          message: [netPriceLine, baseLine, buildScheduleValuesLine(schedules)].filter(Boolean).join("\n"),
+          message: [
+            netPriceLine,
+            clientExecutionIdentical
+              ? buildIdenticalClientExecutionLines(baseLine, execution, green)
+              : [baseLine, buildScheduleValuesLine(schedules)].filter(Boolean).join("\n")
+          ].filter(Boolean).join("\n"),
           parties
         };
       }
@@ -2121,7 +2220,9 @@
       if (!infoOk) {
         return {
           status: "bad",
-          message: ["实际结算机审不通过。", buildScheduleValuesLine(schedules)].filter(Boolean).join("\n"),
+          message: clientExecutionIdentical
+            ? buildIdenticalClientExecutionLines("实际结算机审不通过。", execution, green)
+            : ["实际结算机审不通过。", buildScheduleValuesLine(schedules)].filter(Boolean).join("\n"),
           parties
         };
       }
@@ -2129,16 +2230,30 @@
       if (!executionConsistency.ok) {
         return {
           status: "warn",
-          message: [baseLine, executionConsistency.message].filter(Boolean).join("\n"),
+          message: clientExecutionIdentical
+            ? buildIdenticalClientExecutionLines(baseLine, execution, green, executionConsistency.message)
+            : [baseLine, executionConsistency.message].filter(Boolean).join("\n"),
           parties
         };
       }
 
       return {
         status: "ok",
-        message: `${baseLine}，三个排期信息一致`,
+        message: clientExecutionIdentical
+          ? buildIdenticalClientExecutionLines(`${baseLine}，三个排期信息一致`, execution, green)
+          : `${baseLine}，三个排期信息一致`,
         parties
       };
+    }
+
+    function buildIdenticalClientExecutionLines(overallLine, execution, green, executionNote = "") {
+      const executionLine = [formatScheduleBusinessLine(execution), executionNote].filter(Boolean).join("；");
+      return [
+        overallLine,
+        "客户排期与执行排期完全一致",
+        executionLine,
+        formatScheduleBusinessLine(green)
+      ].join("\n");
     }
 
     function extractSettlementControls(record, label) {
@@ -2671,12 +2786,14 @@
 
     function detectAdjustmentScenario(adjustmentFields) {
       if (!adjustmentFields.length) return null;
+      const prioritySummary = summarizePriorityAdjustments(adjustmentFields);
+      const withPrioritySummary = (scenario) => appendPriorityAdjustmentSummary(scenario, prioritySummary);
       const sourceTables = uniqueSourceTables(adjustmentFields);
       const volumeAndScheduleFields = adjustmentFields.filter((item) => (
         isBookedAmountField(item) || isScheduleField(item)
       ));
       const hasScheduleFields = adjustmentFields.some(isScheduleField);
-      if (!volumeAndScheduleFields.length || !hasScheduleFields) return null;
+      if (!volumeAndScheduleFields.length || !hasScheduleFields) return withPrioritySummary(null);
 
       const ratios = calculateOrderVolumeRatios(sourceTables);
       const hasSpecificTimeSlot = sourceTables.some((table) => {
@@ -2684,19 +2801,19 @@
         return messages.some((message) => message.includes("有时间段定向"));
       });
       if (hasSpecificTimeSlot) {
-        return buildAdjustmentScenario("新增时段定向", "细排、时段", "warn", ratios);
+        return withPrioritySummary(buildAdjustmentScenario("新增时段定向", "细排、时段", "warn", ratios));
       }
 
       const scheduleChanges = volumeAndScheduleFields.filter(isScheduleField);
       const timeSlotPairs = scheduleChanges.map(getScheduleTimeSlotPair).filter(Boolean);
       const specificTimeSlotPairs = timeSlotPairs.filter((pair) => pair.timeCell && pair.timeCell.yellow && !isBlankScheduleValue(pair.timeCell.value));
       if (specificTimeSlotPairs.length) {
-        return buildAdjustmentScenario("新增时段定向", "细排、时段", "warn", ratios);
+        return withPrioritySummary(buildAdjustmentScenario("新增时段定向", "细排、时段", "warn", ratios));
       }
 
       const blankTimeSlotPairs = timeSlotPairs.filter((pair) => pair.timeCell && pair.timeCell.yellow && isBlankScheduleValue(pair.timeCell.value));
       if (blankTimeSlotPairs.length) {
-        return detectDateRangeAdjustmentScenario(blankTimeSlotPairs, ratios);
+        return withPrioritySummary(detectDateRangeAdjustmentScenario(blankTimeSlotPairs, ratios));
       }
 
       const changedTypes = Array.from(new Set(volumeAndScheduleFields.map((item) => (
@@ -2706,7 +2823,64 @@
         ? "原订单项、补量订单项"
         : changedTypes[0];
       const sceneName = `调整铺量-${typeLabel}`;
-      return buildAdjustmentScenario(sceneName, "预定量、细排", "ok", ratios);
+      return withPrioritySummary(buildAdjustmentScenario(sceneName, "预定量、细排", "ok", ratios));
+    }
+
+    function summarizePriorityAdjustments(adjustmentFields) {
+      const groups = new Map();
+      adjustmentFields.filter(isPriorityFieldItem).forEach((item) => {
+        const priority = normalizePriorityValue(item.value);
+        const orderKey = normalizeCell(item.orderId)
+          ? `${item.file}｜${item.sheet}｜${normalizeCell(item.orderId)}`
+          : `${item.file}｜${item.sheet}｜${item.rowNumber}`;
+        if (!groups.has(priority)) groups.set(priority, new Set());
+        groups.get(priority).add(orderKey);
+      });
+      if (!groups.size) return "";
+
+      const priorityOrder = (value) => {
+        const match = String(value).match(/^[A-Za-z]$/);
+        return match ? match[0].toUpperCase().charCodeAt(0) : 1000;
+      };
+      const details = Array.from(groups.entries())
+        .sort(([left], [right]) => priorityOrder(left) - priorityOrder(right) || left.localeCompare(right, "zh-CN"))
+        .map(([priority, orderKeys]) => {
+          const label = priority === "未填写" ? "未填写优先级" : `${priority}优先级`;
+          return `${label}，${orderKeys.size}个订单项`;
+        });
+      return `优先级调整：${details.join("；")}`;
+    }
+
+    function isPriorityFieldItem(item) {
+      return normalizeForList(item && item.field).includes("优先级");
+    }
+
+    function normalizePriorityValue(value) {
+      const normalized = normalizeCell(value).replace(/优先级$/i, "").trim();
+      return normalized ? normalized.toUpperCase() : "未填写";
+    }
+
+    function appendPriorityAdjustmentSummary(scenario, prioritySummary) {
+      if (!prioritySummary) return scenario;
+      if (!scenario) {
+        return {
+          name: "优先级调整",
+          changedFieldLabel: "优先级",
+          severity: "ok",
+          ratios: null,
+          message: prioritySummary
+        };
+      }
+      const changedFields = String(scenario.changedFieldLabel || "")
+        .split("、")
+        .map((field) => field.trim())
+        .filter(Boolean);
+      if (!changedFields.includes("优先级")) changedFields.push("优先级");
+      return {
+        ...scenario,
+        changedFieldLabel: changedFields.join("、"),
+        message: [scenario.message, prioritySummary].filter(Boolean).join("；")
+      };
     }
 
     function detectDateRangeAdjustmentScenario(timeSlotPairs, ratios) {
@@ -3183,6 +3357,15 @@
       document.querySelector("#passCount").textContent = state.stats.pdbRows;
       document.querySelector("#warnCount").textContent = state.stats.abnormalFields;
       document.querySelector("#failCount").textContent = state.stats.abnormalRows;
+
+      if (state.activeTool === "adjustment") {
+        emptyState.classList.add("hidden");
+        resultWrap.classList.add("hidden");
+        resultBody.innerHTML = "";
+        renderSettlementInsight();
+        renderToolNotice();
+        return;
+      }
 
       if (!state.results.length) {
         emptyState.classList.remove("hidden");
