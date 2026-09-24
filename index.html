@@ -2187,6 +2187,12 @@
         && valuesSame(schedules.map((item) => item.quantity))
         && amountsSame(schedules.map((item) => item.amount))
         && valuesSame(schedules.map((item) => item.period));
+      const quantityMismatchLine = schedules.every((item) => item.record && item.amount != null && item.period)
+        && amountsSame(schedules.map((item) => item.amount))
+        && valuesSame(schedules.map((item) => item.period))
+        && !valuesSame(schedules.map((item) => item.quantity))
+          ? buildSettlementQuantityMismatchLine(schedules)
+          : "";
       const executionConsistency = getExecutionPeriodConsistency(execution);
       const period = firstValue([client.period, execution.period, green.period, execution.detailPeriod, execution.headerPeriod, execution.filePeriod]);
       const amount = firstValue([client.amount, execution.amount, green.amount]);
@@ -2210,8 +2216,10 @@
           message: [
             netPriceLine,
             clientExecutionIdentical
-              ? buildIdenticalClientExecutionLines(baseLine, execution, green)
-              : [baseLine, buildScheduleValuesLine(schedules)].filter(Boolean).join("\n")
+              ? buildIdenticalClientExecutionLines(
+                [baseLine, quantityMismatchLine].filter(Boolean).join("；"), execution, green
+              )
+              : [baseLine, buildScheduleValuesLine(schedules), quantityMismatchLine].filter(Boolean).join("\n")
           ].filter(Boolean).join("\n"),
           parties
         };
@@ -2221,8 +2229,10 @@
         return {
           status: "bad",
           message: clientExecutionIdentical
-            ? buildIdenticalClientExecutionLines("实际结算机审不通过。", execution, green)
-            : ["实际结算机审不通过。", buildScheduleValuesLine(schedules)].filter(Boolean).join("\n"),
+            ? buildIdenticalClientExecutionLines(
+              ["实际结算机审不通过。", quantityMismatchLine].filter(Boolean).join(" "), execution, green
+            )
+            : ["实际结算机审不通过。", buildScheduleValuesLine(schedules), quantityMismatchLine].filter(Boolean).join("\n"),
           parties
         };
       }
@@ -2256,6 +2266,24 @@
       ].join("\n");
     }
 
+    function buildSettlementQuantityMismatchLine(schedules) {
+      const values = schedules.map((item) => item.quantity);
+      const details = schedules.map((item) => (
+        `${item.label}${item.quantity == null ? "未读取到购买数量" : `购买数量${Number(item.quantity).toLocaleString("zh-CN")}`}`
+      ));
+      const groups = new Map();
+      values.forEach((value, index) => {
+        const key = value == null ? "missing" : String(value);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(index);
+      });
+      const outlier = [...groups.values()].find((indexes) => indexes.length === 1);
+      const reason = groups.size === 2 && outlier
+        ? `${schedules[outlier[0]].label}与另外两份不一致`
+        : "三份排期购买数量不一致";
+      return `购买数量不一致：${details.join("；")}。${reason}，请核对数量字段及单位。`;
+    }
+
     function extractSettlementControls(record, label) {
       const result = {
         label,
@@ -2277,7 +2305,7 @@
       const isExecution = label === "执行排期";
       const isGreen = label === "绿排期";
       const quantityCandidates = isClient
-        ? ["total imp 000", "total imp", "total impressions", "impressions", "count", "paid quantity", "purchased quantity", "quantity", "qty", "购买数量", "购买总量", "总数量", "数量", "投放量", "contract amount"]
+        ? ["paid quantity", "purchased quantity", "购买数量", "购买总量", "总数量", "contract amount", "投放量", "数量", "quantity", "qty", "count"]
         : ["contract amount", "购买数量", "purchased quantity", "quantity", "amount", "数量"];
       const amountCandidates = isClient
         ? ["total package net", "total net cost", "total net price", "net total", "paid total", "payable amount", "折后净总价", "总净价", "净总价", "实付总金额", "实结金额", "投放金额", "购买总价", "折后总价", "合同金额", "净额", "金额"]
@@ -2286,7 +2314,9 @@
           : isGreen
             ? ["购买总价", "购买总价￥", "购买总价元", "total net price"]
           : ["购买总价", "total net cost", "purchased total", "net payable", "actual paid", "金额", "净额"];
-      const quantityCol = findHeaderColumn(header, quantityCandidates);
+      const quantityCol = isClient
+        ? findClientQuantityColumn(header, quantityCandidates)
+        : findHeaderColumn(header, quantityCandidates);
       const amountCol = findHeaderColumn(header, amountCandidates);
       if (quantityCol >= 0) result.quantity = isClient
         ? readClientTotalOrSum(table, headerRowIndex, quantityCol)
@@ -2395,6 +2425,22 @@
         if (containsIndex >= 0) return containsIndex;
       }
       return -1;
+    }
+
+    function findClientQuantityColumn(header, candidates) {
+      const normalizedHeader = (header || []).map((cell) => normalizeForList(cell).toLowerCase());
+      const normalizedCandidates = candidates.map((candidate) => normalizeForList(candidate).toLowerCase());
+      for (const candidate of normalizedCandidates) {
+        const index = normalizedHeader.findIndex((text) => text === candidate);
+        if (index >= 0) return index;
+      }
+      for (const candidate of normalizedCandidates) {
+        const index = normalizedHeader.findIndex((text, colIndex) => candidate === "count"
+          ? /\bcount\b/i.test(String(header[colIndex]))
+          : text.includes(candidate));
+        if (index >= 0) return index;
+      }
+      return findHeaderColumn(header, ["total imp 000", "total imp", "total impressions", "impressions"]);
     }
 
     function readTotalOrSum(table, headerRowIndex, colIndex) {
@@ -2754,6 +2800,8 @@
           const cells = table.cells[rowIndex] || [];
           const orderName = normalizeCell(row[orderNameCol]) || `第 ${rowIndex + 1} 行`;
           const orderId = normalizeCell(row[orderIdCol]);
+          const isNewOrderRow = rowIndex + 1 >= TIME_SLOT_DETECT_START_ROW_NUMBER && isFullyYellowRow(row, cells);
+          const newOrderType = normalizeCell(row[COL_R]) || "未识别类型";
 
           cells.forEach((cell, colIndex) => {
             if (!cell || !cell.yellow) return;
@@ -2772,10 +2820,12 @@
               sourceTable: table,
               sourceRow: row,
               isReplenishment: isReplenishmentOrderRow(row),
+              isNewOrderRow,
+              newOrderType,
               field: fieldLabel(fieldRow, colIndex),
               address: `${columnName(colIndex)}${rowIndex + 1}`,
               value: cell.value,
-              message: "发现调整字段"
+              message: isNewOrderRow ? `有新增${newOrderType}订单项` : "发现调整字段"
             });
           });
         });
@@ -2786,14 +2836,20 @@
 
     function detectAdjustmentScenario(adjustmentFields) {
       if (!adjustmentFields.length) return null;
-      const prioritySummary = summarizePriorityAdjustments(adjustmentFields);
+      const regularAdjustmentFields = adjustmentFields.filter((item) => !item.isNewOrderRow);
+      const prioritySummary = summarizePriorityAdjustments(regularAdjustmentFields);
       const withPrioritySummary = (scenario) => appendPriorityAdjustmentSummary(scenario, prioritySummary);
-      const sourceTables = uniqueSourceTables(adjustmentFields);
-      const volumeAndScheduleFields = adjustmentFields.filter((item) => (
+      const supplementalNotices = [
+        ...summarizeNewOrderNotices(adjustmentFields),
+        ...detectReplenishmentPeriodNotices(adjustmentFields)
+      ];
+      const finalizeScenario = (scenario) => appendAdjustmentScenarioNotices(withPrioritySummary(scenario), supplementalNotices);
+      const sourceTables = uniqueSourceTables(regularAdjustmentFields);
+      const volumeAndScheduleFields = regularAdjustmentFields.filter((item) => (
         isBookedAmountField(item) || isScheduleField(item)
       ));
-      const hasScheduleFields = adjustmentFields.some(isScheduleField);
-      if (!volumeAndScheduleFields.length || !hasScheduleFields) return withPrioritySummary(null);
+      const hasScheduleFields = regularAdjustmentFields.some(isScheduleField);
+      if (!volumeAndScheduleFields.length || !hasScheduleFields) return finalizeScenario(null);
 
       const ratios = calculateOrderVolumeRatios(sourceTables);
       const hasSpecificTimeSlot = sourceTables.some((table) => {
@@ -2801,19 +2857,19 @@
         return messages.some((message) => message.includes("有时间段定向"));
       });
       if (hasSpecificTimeSlot) {
-        return withPrioritySummary(buildAdjustmentScenario("新增时段定向", "细排、时段", "warn", ratios));
+        return finalizeScenario(buildAdjustmentScenario("新增时段定向", "细排、时段", "warn", ratios));
       }
 
       const scheduleChanges = volumeAndScheduleFields.filter(isScheduleField);
       const timeSlotPairs = scheduleChanges.map(getScheduleTimeSlotPair).filter(Boolean);
       const specificTimeSlotPairs = timeSlotPairs.filter((pair) => pair.timeCell && pair.timeCell.yellow && !isBlankScheduleValue(pair.timeCell.value));
       if (specificTimeSlotPairs.length) {
-        return withPrioritySummary(buildAdjustmentScenario("新增时段定向", "细排、时段", "warn", ratios));
+        return finalizeScenario(buildAdjustmentScenario("新增时段定向", "细排、时段", "warn", ratios));
       }
 
       const blankTimeSlotPairs = timeSlotPairs.filter((pair) => pair.timeCell && pair.timeCell.yellow && isBlankScheduleValue(pair.timeCell.value));
       if (blankTimeSlotPairs.length) {
-        return withPrioritySummary(detectDateRangeAdjustmentScenario(blankTimeSlotPairs, ratios));
+        return finalizeScenario(detectDateRangeAdjustmentScenario(blankTimeSlotPairs, ratios));
       }
 
       const changedTypes = Array.from(new Set(volumeAndScheduleFields.map((item) => (
@@ -2823,7 +2879,125 @@
         ? "原订单项、补量订单项"
         : changedTypes[0];
       const sceneName = `调整铺量-${typeLabel}`;
-      return withPrioritySummary(buildAdjustmentScenario(sceneName, "预定量、细排", "ok", ratios));
+      return finalizeScenario(buildAdjustmentScenario(sceneName, "预定量、细排", "ok", ratios));
+    }
+
+    function summarizeNewOrderNotices(adjustmentFields) {
+      const rows = uniqueAdjustedOrderItems(adjustmentFields.filter((item) => item.isNewOrderRow));
+      if (!rows.length) return [];
+      const typeOrder = ["购买", "补量", "配送"];
+      const types = Array.from(new Set(rows.map((item) => normalizeCell(item.newOrderType) || "未识别类型")))
+        .sort((left, right) => {
+          const leftIndex = typeOrder.indexOf(left);
+          const rightIndex = typeOrder.indexOf(right);
+          return (leftIndex < 0 ? typeOrder.length : leftIndex) - (rightIndex < 0 ? typeOrder.length : rightIndex)
+            || left.localeCompare(right, "zh-CN");
+        });
+      return types.map((type) => ({ message: `有新增${type}订单项`, severity: "warn", changedFieldLabel: "整行标黄" }));
+    }
+
+    function detectReplenishmentPeriodNotices(adjustmentFields) {
+      const scheduleFields = adjustmentFields.filter((item) => item.isReplenishment && isScheduleField(item));
+      const replenishmentItems = uniqueAdjustedOrderItems(scheduleFields);
+      const newOutside = [];
+      const existingOutside = [];
+      const missingOriginal = [];
+
+      replenishmentItems.forEach((item) => {
+        const check = checkReplenishmentPeriodWithinOriginal(item);
+        if (check.status === "missing-original" || check.status === "missing-period") {
+          missingOriginal.push(item);
+        } else if (check.status === "outside") {
+          (item.isNewOrderRow ? newOutside : existingOutside).push(item);
+        }
+      });
+
+      const notices = [];
+      if (newOutside.length) {
+        notices.push({
+          message: `⚠ 新增补量订单项周期不在原订单项投放周期范围内，请排查（${newOutside.length}个订单项）`,
+          severity: "bad",
+          changedFieldLabel: "细排"
+        });
+      }
+      if (existingOutside.length) {
+        notices.push({
+          message: `⚠ 补量订单项周期不在原订单项投放周期范围内，请排查（${existingOutside.length}个订单项）`,
+          severity: "bad",
+          changedFieldLabel: "细排"
+        });
+      }
+      if (missingOriginal.length) {
+        notices.push({
+          message: `⚠ 有补量订单项无法找到关联原订单项或有效投放周期，请排查（${missingOriginal.length}个订单项）`,
+          severity: "bad",
+          changedFieldLabel: "关联订单项ID、细排"
+        });
+      }
+      return notices;
+    }
+
+    function uniqueAdjustedOrderItems(items) {
+      const rows = new Map();
+      items.forEach((item) => {
+        const key = adjustmentItemKey(item);
+        if (!rows.has(key)) rows.set(key, item);
+      });
+      return Array.from(rows.values());
+    }
+
+    function checkReplenishmentPeriodWithinOriginal(item) {
+      const originalRow = findOriginalOrderRow(item);
+      if (!originalRow) return { status: "missing-original" };
+      const replenishmentIndexes = getSchedulePointColIndexes(item.sourceRow || []);
+      const originalIndexes = getSchedulePointColIndexes(originalRow);
+      if (!replenishmentIndexes.length || !originalIndexes.length) return { status: "missing-period" };
+      const replenishmentStart = Math.min(...replenishmentIndexes);
+      const replenishmentEnd = Math.max(...replenishmentIndexes);
+      const originalStart = Math.min(...originalIndexes);
+      const originalEnd = Math.max(...originalIndexes);
+      return {
+        status: replenishmentStart >= originalStart && replenishmentEnd <= originalEnd ? "inside" : "outside",
+        replenishmentStart,
+        replenishmentEnd,
+        originalStart,
+        originalEnd
+      };
+    }
+
+    function appendAdjustmentScenarioNotices(scenario, notices) {
+      const allNotices = [];
+      if (scenario && scenario.message) {
+        allNotices.push({
+          message: scenario.message,
+          severity: scenario.severity || "ok",
+          changedFieldLabel: scenario.changedFieldLabel || ""
+        });
+      }
+      (notices || []).forEach((notice) => {
+        if (!notice || !notice.message || allNotices.some((item) => item.message === notice.message)) return;
+        const existingText = allNotices.map((item) => item.message).join("；");
+        if (notice.message.includes("补量订单项周期不在原订单项投放周期范围内")
+          && existingText.includes("补量订单项日期扩充，新增日期不在原定单项投放周期内")) return;
+        allNotices.push(notice);
+      });
+      if (!allNotices.length) return null;
+      const severity = allNotices.some((notice) => notice.severity === "bad")
+        ? "bad"
+        : allNotices.some((notice) => notice.severity === "warn") ? "warn" : "ok";
+      const changedFields = uniquePrograms(allNotices
+        .flatMap((notice) => String(notice.changedFieldLabel || "").split("、"))
+        .map((field) => field.trim())
+        .filter(Boolean));
+      return {
+        ...(scenario || {}),
+        name: (scenario && scenario.name) || allNotices.map((notice) => notice.message).join("；"),
+        changedFieldLabel: changedFields.join("、"),
+        severity,
+        ratios: (scenario && scenario.ratios) || null,
+        message: allNotices.map((notice) => notice.message).join("；"),
+        notices: allNotices
+      };
     }
 
     function summarizePriorityAdjustments(adjustmentFields) {
@@ -2890,17 +3064,21 @@
       let severity = "ok";
 
       const replenishmentShrink = shrinkPairs.some((pair) => pair.item.isReplenishment);
-      const originalShrink = shrinkPairs.some((pair) => !pair.item.isReplenishment);
+      const originalShrinkPairs = shrinkPairs.filter((pair) => !pair.item.isReplenishment);
+      const originalExpansionPairs = expansionPairs.filter((pair) => !pair.item.isReplenishment);
+      const softPlaceholderDelayKeys = findSoftPlaceholderDelayKeys(originalShrinkPairs, originalExpansionPairs);
+      const originalShrink = originalShrinkPairs.some((pair) => !softPlaceholderDelayKeys.has(adjustmentItemKey(pair.item)));
       if (replenishmentShrink) messages.push("检测到改单场景：补量订单项日期缩减");
+      if (softPlaceholderDelayKeys.size) messages.push("检测到改单场景：软性占位延期");
       if (originalShrink) {
         messages.push("⚠ 检测到改单场景：原订单项日期缩减，请排查原因");
         severity = "bad";
       }
 
       const replenishmentExpansion = expansionPairs.filter((pair) => pair.item.isReplenishment);
-      const originalExpansion = expansionPairs.some((pair) => !pair.item.isReplenishment);
-      const originalExpansionPairs = expansionPairs.filter((pair) => !pair.item.isReplenishment);
-      const isDelayReplenishment = replenishmentExpansion.length && originalExpansionPairs.length;
+      const originalExpansion = originalExpansionPairs.some((pair) => !softPlaceholderDelayKeys.has(adjustmentItemKey(pair.item)));
+      const nonSoftOriginalExpansionPairs = originalExpansionPairs.filter((pair) => !softPlaceholderDelayKeys.has(adjustmentItemKey(pair.item)));
+      const isDelayReplenishment = replenishmentExpansion.length && nonSoftOriginalExpansionPairs.length;
 
       if (isDelayReplenishment) {
         messages.push("检测到改单场景：延期补量");
@@ -2927,6 +3105,29 @@
         ratios,
         message: uniquePrograms(messages).join("；") || "检测到改单场景：调整铺量"
       };
+    }
+
+    function findSoftPlaceholderDelayKeys(shrinkPairs, expansionPairs) {
+      const expandedKeys = new Set(expansionPairs
+        .filter((pair) => isSoftPlaceholderOrderItem(pair.item))
+        .map((pair) => adjustmentItemKey(pair.item)));
+      return new Set(shrinkPairs
+        .filter((pair) => isSoftPlaceholderOrderItem(pair.item))
+        .map((pair) => adjustmentItemKey(pair.item))
+        .filter((key) => expandedKeys.has(key)));
+    }
+
+    function adjustmentItemKey(item) {
+      return `${item.file}｜${item.sheet}｜${item.rowNumber}`;
+    }
+
+    function isSoftPlaceholderOrderItem(item) {
+      const orderName = normalizeForList(item && item.orderName);
+      if (["占位", "软性占位", "周期待定"].some((keyword) => orderName.includes(keyword))) return true;
+      if (!item || !item.sourceTable || !item.sourceRow) return false;
+      const fieldRow = getFieldRow(item.sourceTable);
+      const productCol = fieldRow.findIndex((cell) => normalizeForList(cell).includes("品效广告产品"));
+      return productCol >= 0 && normalizeForList(item.sourceRow[productCol]) === "软性占位非标";
     }
 
     function buildAdjustmentScenario(sceneName, changedFieldLabel, severity, ratios) {
@@ -3488,8 +3689,14 @@
       if (!state.adjustmentScenario) {
         adjustmentScenarioPreview.innerHTML = scenarioPlaceholder;
       } else {
-        const toneClass = state.adjustmentScenario.severity === "bad" ? "danger-summary" : "";
-        adjustmentScenarioPreview.innerHTML = `<div class="no-change-result scenario-notice ${toneClass}">${formatScenarioPreviewLines(state.adjustmentScenario.message)}</div>`;
+        const notices = state.adjustmentScenario.notices || [{
+          message: state.adjustmentScenario.message,
+          severity: state.adjustmentScenario.severity
+        }];
+        adjustmentScenarioPreview.innerHTML = notices.map((notice) => {
+          const toneClass = notice.severity === "bad" ? "danger-summary" : notice.severity === "warn" ? "warn-summary" : "";
+          return `<div class="no-change-result scenario-notice ${toneClass}">${formatScenarioPreviewLines(notice.message)}</div>`;
+        }).join("");
       }
 
       if (!adjustmentVolumePreview) return;
