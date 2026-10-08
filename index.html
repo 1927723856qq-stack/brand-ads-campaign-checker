@@ -952,6 +952,7 @@
     const COL_BH = 59;
     const COL_BV = 73;
     const COL_BW = 74;
+    const COL_BX = 75;
     const COL_BZ = 77;
     const COL_CA = 78;
     const SCHEDULE_START_COL = 86;
@@ -2841,6 +2842,7 @@
       const withPrioritySummary = (scenario) => appendPriorityAdjustmentSummary(scenario, prioritySummary);
       const supplementalNotices = [
         ...summarizeNewOrderNotices(adjustmentFields),
+        ...detectNewReplenishmentValidationNotices(adjustmentFields),
         ...detectReplenishmentPeriodNotices(adjustmentFields)
       ];
       const finalizeScenario = (scenario) => appendAdjustmentScenarioNotices(withPrioritySummary(scenario), supplementalNotices);
@@ -2893,7 +2895,219 @@
           return (leftIndex < 0 ? typeOrder.length : leftIndex) - (rightIndex < 0 ? typeOrder.length : rightIndex)
             || left.localeCompare(right, "zh-CN");
         });
-      return types.map((type) => ({ message: `有新增${type}订单项`, severity: "warn", changedFieldLabel: "整行标黄" }));
+      return types.flatMap((type) => {
+        if (type !== "补量") {
+          return [{ message: `有新增${type}订单项`, severity: "warn", changedFieldLabel: "整行标黄" }];
+        }
+        const groups = buildNewReplenishmentGroups(rows.filter((item) => item.isReplenishment));
+        if (!groups.length) {
+          return [{ message: "有新增补量订单项", severity: "warn", changedFieldLabel: "整行标黄" }];
+        }
+        return groups.map((group) => ({
+          message: buildNewReplenishmentSummary(group),
+          severity: "warn",
+          changedFieldLabel: "整行标黄"
+        }));
+      });
+    }
+
+    function buildNewReplenishmentGroups(items) {
+      const groups = new Map();
+      uniqueAdjustedOrderItems(items).forEach((item) => {
+        const originalOrderId = normalizeCell(item.sourceRow && item.sourceRow[COL_BH]);
+        const key = `${item.file}｜${item.sheet}｜${originalOrderId || `row-${item.rowNumber}`}`;
+        if (!groups.has(key)) {
+          groups.set(key, {
+            originalOrderId,
+            originalRow: findOriginalOrderRow(item),
+            sourceTable: item.sourceTable,
+            items: []
+          });
+        }
+        groups.get(key).items.push(item);
+      });
+      return Array.from(groups.values());
+    }
+
+    function buildNewReplenishmentSummary(group) {
+      const originalFormat = group.originalRow
+        ? summarizeAdvertisingFormat(group.sourceTable, group.originalRow)
+        : "原订单项广告形式待确认";
+      const replenishmentFormats = uniquePrograms(group.items
+        .map((item) => summarizeAdvertisingFormat(item.sourceTable, item.sourceRow))
+        .filter(Boolean));
+      const channelValues = uniquePrograms(group.items
+        .flatMap((item) => parseTargetingValues(getFieldValue(item.sourceTable, item.sourceRow, ["频道定向", "频道"]), false)));
+      const originalCities = group.originalRow
+        ? parseTargetingValues(getFieldValue(group.sourceTable, group.originalRow, ["地域定向", "定向城市", "城市定向"]), true)
+        : [];
+      const replenishmentCities = uniquePrograms(group.items
+        .flatMap((item) => parseTargetingValues(getFieldValue(item.sourceTable, item.sourceRow, ["地域定向", "定向城市", "城市定向"]), true)));
+      const replenishmentCityKeys = new Set(replenishmentCities.map(normalizeForList));
+      const missingCities = originalCities.filter((city) => !replenishmentCityKeys.has(normalizeForList(city)));
+      const summaryParts = [
+        `有新增补量订单项：${originalFormat || "原订单项广告形式待确认"}，补量形式为${replenishmentFormats.join("、") || "待确认"}`,
+        `频道定向：${channelValues.join("、") || "未设置"}`
+      ];
+      if (missingCities.length) summaryParts.push(`无${missingCities.join("、")}`);
+      return summaryParts.join("；");
+    }
+
+    function summarizeAdvertisingFormat(table, row) {
+      const product = normalizeCell(getFieldValue(table, row, ["品效广告产品"]));
+      const interactions = parseTargetingValues(getFieldValue(table, row, ["互动方式"]), false)
+        .filter((value) => normalizeForList(value) !== "点击");
+      const suffix = interactions.filter((value) => !normalizeForList(product).includes(normalizeForList(value))).join("、");
+      return `${product}${suffix}`.trim();
+    }
+
+    function detectNewReplenishmentValidationNotices(adjustmentFields) {
+      const newReplenishmentItems = uniqueAdjustedOrderItems(adjustmentFields.filter((item) => (
+        item.isNewOrderRow && item.isReplenishment
+      )));
+      const groups = buildNewReplenishmentGroups(newReplenishmentItems);
+      const notices = [];
+
+      groups.forEach((group) => {
+        if (!group.originalRow) return;
+        const originalLabel = normalizeCell(group.originalRow[findOrderNameColumn(group.sourceTable)])
+          || group.originalOrderId
+          || "未识别原订单项";
+        const mismatchedFields = [];
+        const pairwiseFields = [
+          { label: "净单价", aliases: ["折后单价(￥)", "折后单价", "净单价", "Unit Price after discount (RMB)"], numeric: true },
+          { label: "频次控制", aliases: ["频次控制"] },
+          { label: "优先级", aliases: ["优先级"] }
+        ];
+
+        pairwiseFields.forEach((field) => {
+          const originalValue = getFieldValue(group.sourceTable, group.originalRow, field.aliases);
+          const mismatch = group.items.some((item) => !fieldValuesEqual(
+            originalValue,
+            getFieldValue(item.sourceTable, item.sourceRow, field.aliases),
+            field.numeric
+          ));
+          if (mismatch) mismatchedFields.push(field.label);
+        });
+
+        const originalCities = parseTargetingValues(getFieldValue(group.sourceTable, group.originalRow, ["地域定向", "定向城市", "城市定向"]), true);
+        const replenishmentCities = uniquePrograms(group.items
+          .flatMap((item) => parseTargetingValues(getFieldValue(item.sourceTable, item.sourceRow, ["地域定向", "定向城市", "城市定向"]), true)));
+        if (!stringSetsEqual(originalCities, replenishmentCities)) mismatchedFields.push("定向城市");
+
+        if (mismatchedFields.length) {
+          notices.push({
+            message: `⚠ 新增补量订单项与原订单项“${originalLabel}”的${mismatchedFields.join("、")}不一致`,
+            severity: "bad",
+            changedFieldLabel: mismatchedFields.join("、")
+          });
+        }
+
+        const preferredClickMismatch = group.items.some((item) => {
+          const replenishmentTarget = normalizeForList(getFieldValue(item.sourceTable, item.sourceRow, ["投放目标"]));
+          const originalTarget = normalizeForList(getFieldValue(group.sourceTable, group.originalRow, ["投放目标"]));
+          return replenishmentTarget === "优选点击" && originalTarget !== "优选点击";
+        });
+        if (preferredClickMismatch) {
+          notices.push({
+            message: `⚠ 新增补量订单项投放目标为“优选点击”，但原订单项“${originalLabel}”不是“优选点击”`,
+            severity: "bad",
+            changedFieldLabel: "投放目标"
+          });
+        }
+
+        const platformProblems = [];
+        const originalPlatforms = parsePlatformValues(getFieldValue(group.sourceTable, group.originalRow, ["选中平台"]));
+        const originalPlatformKeys = new Set(originalPlatforms.map((value) => normalizeForList(value).toLowerCase()));
+        group.items.forEach((item) => {
+          const platforms = parsePlatformValues(getFieldValue(item.sourceTable, item.sourceRow, ["选中平台"]));
+          if (platforms.some((value) => /pc/i.test(value))) platformProblems.push("选中平台含PC");
+          const extras = platforms.filter((value) => !originalPlatformKeys.has(normalizeForList(value).toLowerCase()));
+          if (extras.length) platformProblems.push(`选中平台超出原订单项：${extras.join("、")}`);
+        });
+        const uniquePlatformProblems = uniquePrograms(platformProblems);
+        if (uniquePlatformProblems.length) {
+          notices.push({
+            message: `⚠ 新增补量订单项${uniquePlatformProblems.join("；")}`,
+            severity: "bad",
+            changedFieldLabel: "选中平台"
+          });
+        }
+
+        const forbiddenValues = ["时间片1", "正一", "位次1"].filter((keyword) => group.items.some((item) => (
+          (item.sourceRow || []).some((value) => normalizeForList(value) === keyword)
+        )));
+        if (forbiddenValues.length) {
+          notices.push({
+            message: `⚠ 新增补量订单项字段中出现${forbiddenValues.join("、")}`,
+            severity: "bad",
+            changedFieldLabel: "高风险字段值"
+          });
+        }
+      });
+
+      return notices;
+    }
+
+    function getFieldValue(table, row, aliases) {
+      const colIndex = findFieldColumn(table, aliases);
+      return colIndex >= 0 ? row[colIndex] : "";
+    }
+
+    function findFieldColumn(table, aliases) {
+      const fieldRow = getFieldRow(table);
+      const normalizedFields = fieldRow.map((value) => normalizeForList(value).toLowerCase());
+      const normalizedAliases = aliases.map((value) => normalizeForList(value).toLowerCase());
+      for (const alias of normalizedAliases) {
+        const exactIndex = normalizedFields.findIndex((value) => value === alias);
+        if (exactIndex >= 0) return exactIndex;
+      }
+      for (const alias of normalizedAliases) {
+        const containsIndex = normalizedFields.findIndex((value) => value.includes(alias));
+        if (containsIndex >= 0) return containsIndex;
+      }
+      return -1;
+    }
+
+    function parseTargetingValues(value, normalizeCity) {
+      return uniquePrograms(normalizeCell(value)
+        .replace(/_x000D_/gi, "\n")
+        .split(/[\n,，、;；+]+/)
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .map((part) => normalizeCity ? normalizeCityName(part) : part));
+    }
+
+    function normalizeCityName(value) {
+      return normalizeCell(value)
+        .replace(/[（(](?:正|反)[）)]/g, "")
+        .replace(/^(?:正向|反向)/, "")
+        .replace(/市$/, "")
+        .trim();
+    }
+
+    function parsePlatformValues(value) {
+      return parseTargetingValues(value, false)
+        .map((part) => part.replace(/[（(](?:正|反)[）)]/g, "").trim())
+        .filter(Boolean);
+    }
+
+    function fieldValuesEqual(left, right, numeric) {
+      if (numeric) {
+        const leftNumber = parseStrictAmount(left);
+        const rightNumber = parseStrictAmount(right);
+        if (leftNumber != null || rightNumber != null) {
+          return leftNumber != null && rightNumber != null && Math.abs(leftNumber - rightNumber) < 0.000001;
+        }
+      }
+      return normalizeForList(normalizeCell(left).replace(/_x000D_/gi, ""))
+        === normalizeForList(normalizeCell(right).replace(/_x000D_/gi, ""));
+    }
+
+    function stringSetsEqual(left, right) {
+      const leftSet = new Set(left.map((value) => normalizeForList(value)));
+      const rightSet = new Set(right.map((value) => normalizeForList(value)));
+      return leftSet.size === rightSet.size && Array.from(leftSet).every((value) => rightSet.has(value));
     }
 
     function detectReplenishmentPeriodNotices(adjustmentFields) {
@@ -3275,8 +3489,9 @@
         (table.rows || []).forEach((row, rowIndex) => {
           if (rowIndex + 1 < TIME_SLOT_DETECT_START_ROW_NUMBER || isTimeSlotDetailRow(rowIndex)) return;
           const booked = parseAmount(row[COL_BV]);
+          const bookedWithGap = booked * (1 + parseGapPercent(row[COL_BX]));
           const purchased = parseAmount(row[COL_BZ]);
-          sum.booked += booked;
+          sum.booked += bookedWithGap;
           sum.purchased += purchased;
           if (isReplenishmentOrderRow(row)) sum.replenishmentBooked += booked;
         });
@@ -3297,6 +3512,16 @@
       if (!text || text === "--") return 0;
       const number = Number(text);
       return Number.isFinite(number) ? number : 0;
+    }
+
+    function parseGapPercent(value) {
+      const text = normalizeCell(value).replace(/,/g, "");
+      if (!text || text === "--") return 0;
+      const hasPercentSign = text.includes("%");
+      const number = Number(text.replace(/%/g, ""));
+      if (!Number.isFinite(number)) return 0;
+      if (hasPercentSign || Math.abs(number) > 1) return number / 100;
+      return number;
     }
 
     function formatRatio(numerator, denominator) {
@@ -3446,8 +3671,13 @@
     function isSchedulePoint(value) {
       const text = normalizeCell(value);
       if (!text || text === "--") return false;
+      if (isUnlimitedScheduleValue(text)) return true;
       const numeric = Number(text.replace(/,/g, ""));
       return Number.isFinite(numeric) && numeric > 0;
+    }
+
+    function isUnlimitedScheduleValue(value) {
+      return normalizeForList(value) === "不限量";
     }
 
     function formatScheduleDate(monthInfo, dayValue) {
