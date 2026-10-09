@@ -2874,16 +2874,6 @@
       const strict = parseScheduleMonth(value);
       if (strict) return strict;
       const text = normalizeCell(value);
-      const chineseMatch = normalizeForList(text).match(/^(\d{1,2})月份?(?:投放)?(?:周期|排期)?$/);
-      if (chineseMatch) {
-        const month = Number(chineseMatch[1]);
-        if (month < 1 || month > 12) return null;
-        if (referenceYearMonth && referenceYearMonth.month !== month) return null;
-        const year = referenceYearMonth ? referenceYearMonth.year : years[0];
-        return year ? { year, month } : null;
-      }
-      const match = text.match(/^([A-Za-z]{3,9})\.?$/);
-      if (!match) return null;
       const monthMap = {
         jan: 1, january: 1,
         feb: 2, february: 2,
@@ -2898,6 +2888,23 @@
         nov: 11, november: 11,
         dec: 12, december: 12
       };
+      const namedMonthWithYear = text.match(/^(?:(20\d{2})\s*[-/.]?\s*([A-Za-z]{3,9})\.?|([A-Za-z]{3,9})\.?\s*[-/.]?\s*(20\d{2}))$/);
+      if (namedMonthWithYear) {
+        const year = Number(namedMonthWithYear[1] || namedMonthWithYear[4]);
+        const monthName = (namedMonthWithYear[2] || namedMonthWithYear[3] || "").toLowerCase();
+        const month = monthMap[monthName];
+        if (year && month) return { year, month };
+      }
+      const chineseMatch = normalizeForList(text).match(/^(\d{1,2})月份?(?:投放)?(?:周期|排期)?$/);
+      if (chineseMatch) {
+        const month = Number(chineseMatch[1]);
+        if (month < 1 || month > 12) return null;
+        if (referenceYearMonth && referenceYearMonth.month !== month) return null;
+        const year = referenceYearMonth ? referenceYearMonth.year : years[0];
+        return year ? { year, month } : null;
+      }
+      const match = text.match(/^([A-Za-z]{3,9})\.?$/);
+      if (!match) return null;
       const month = monthMap[match[1].toLowerCase()];
       if (!month) return null;
       return { year: years[0], month };
@@ -3163,18 +3170,18 @@
         .filter(Boolean));
       const channelValues = uniquePrograms(group.items
         .flatMap((item) => parseTargetingValues(getFieldValue(item.sourceTable, item.sourceRow, ["频道定向", "频道"]), false)));
-      const originalCities = group.originalRow
-        ? parseTargetingValues(getFieldValue(group.sourceTable, group.originalRow, ["地域定向", "定向城市", "城市定向"]), true)
-        : [];
-      const replenishmentCities = uniquePrograms(group.items
-        .flatMap((item) => parseTargetingValues(getFieldValue(item.sourceTable, item.sourceRow, ["地域定向", "定向城市", "城市定向"]), true)));
-      const replenishmentCityKeys = new Set(replenishmentCities.map(normalizeForList));
-      const missingCities = originalCities.filter((city) => !replenishmentCityKeys.has(normalizeForList(city)));
+      const originalCityTargeting = group.originalRow
+        ? getFieldValue(group.sourceTable, group.originalRow, ["地域定向", "定向城市", "城市定向"])
+        : "";
+      const replenishmentCityTargeting = group.items.map((item) => (
+        getFieldValue(item.sourceTable, item.sourceRow, ["地域定向", "定向城市", "城市定向"])
+      ));
+      const cityComparison = compareReplenishmentCityTargeting(originalCityTargeting, replenishmentCityTargeting);
       const summaryParts = [
         `有新增补量订单项：${originalFormat || "原订单项广告形式待确认"}，补量形式为${replenishmentFormats.join("、") || "待确认"}`,
         `频道定向：${channelValues.join("、") || "未设置"}`
       ];
-      if (missingCities.length) summaryParts.push(`无${missingCities.join("、")}`);
+      if (cityComparison.excludedCities.length) summaryParts.push(`无${cityComparison.excludedCities.join("、")}`);
       return summaryParts.join("；");
     }
 
@@ -3215,10 +3222,12 @@
           if (mismatch) mismatchedFields.push(field.label);
         });
 
-        const originalCities = parseTargetingValues(getFieldValue(group.sourceTable, group.originalRow, ["地域定向", "定向城市", "城市定向"]), true);
-        const replenishmentCities = uniquePrograms(group.items
-          .flatMap((item) => parseTargetingValues(getFieldValue(item.sourceTable, item.sourceRow, ["地域定向", "定向城市", "城市定向"]), true)));
-        if (!stringSetsEqual(originalCities, replenishmentCities)) mismatchedFields.push("定向城市");
+        const originalCityTargeting = getFieldValue(group.sourceTable, group.originalRow, ["地域定向", "定向城市", "城市定向"]);
+        const replenishmentCityTargeting = group.items.map((item) => (
+          getFieldValue(item.sourceTable, item.sourceRow, ["地域定向", "定向城市", "城市定向"])
+        ));
+        const cityComparison = compareReplenishmentCityTargeting(originalCityTargeting, replenishmentCityTargeting);
+        if (!cityComparison.isEqualOrPermittedExclusion) mismatchedFields.push("定向城市");
 
         if (mismatchedFields.length) {
           notices.push({
@@ -3301,6 +3310,106 @@
         .map((part) => part.trim())
         .filter(Boolean)
         .map((part) => normalizeCity ? normalizeCityName(part) : part));
+    }
+
+    function compareReplenishmentCityTargeting(originalValue, replenishmentValues) {
+      const originalDirection = parseDirectionalCityTargeting(originalValue);
+      const replenishmentDirection = mergeDirectionalCityTargeting(replenishmentValues || []);
+      const originalCities = uniquePrograms([
+        ...originalDirection.positive,
+        ...originalDirection.reverse,
+        ...originalDirection.neutral
+      ]);
+      const replenishmentCities = uniquePrograms([
+        ...replenishmentDirection.positive,
+        ...replenishmentDirection.reverse,
+        ...replenishmentDirection.neutral
+      ]);
+      const originalKeys = new Set(originalCities.map(normalizeForList));
+      const replenishmentKeys = new Set(replenishmentCities.map(normalizeForList));
+      const missingCities = originalCities.filter((city) => !replenishmentKeys.has(normalizeForList(city)));
+      const extraCities = replenishmentCities.filter((city) => !originalKeys.has(normalizeForList(city)));
+      const isEqual = stringSetsEqual(originalCities, replenishmentCities);
+      const isCitySubsetExclusion = replenishmentKeys.size > 0
+        && missingCities.length > 0
+        && extraCities.length === 0;
+
+      const replenishmentReverseKeys = new Set(replenishmentDirection.reverse.map(normalizeForList));
+      const keepsOriginalPositive = originalDirection.positive.every((city) => (
+        replenishmentDirection.positive.some((value) => normalizeForList(value) === normalizeForList(city))
+      ));
+      const keepsOriginalReverse = originalDirection.reverse.every((city) => (
+        replenishmentDirection.reverse.some((value) => normalizeForList(value) === normalizeForList(city))
+      ));
+      const extraReverseCities = extraCities.filter((city) => replenishmentReverseKeys.has(normalizeForList(city)));
+      const isNationwideReverseExclusion = isNationwideChinaTargeting(originalDirection)
+        && keepsOriginalPositive
+        && keepsOriginalReverse
+        && extraCities.length > 0
+        && extraReverseCities.length === extraCities.length;
+
+      return {
+        excludedCities: uniquePrograms([
+          ...missingCities,
+          ...(isNationwideReverseExclusion ? extraReverseCities : [])
+        ]),
+        isEqualOrPermittedExclusion: isEqual || isCitySubsetExclusion || isNationwideReverseExclusion
+      };
+    }
+
+    function parseDirectionalCityTargeting(value) {
+      const result = { positive: [], reverse: [], neutral: [] };
+      let activeDirection = "neutral";
+      normalizeCell(value)
+        .replace(/_x000D_/gi, "\n")
+        .split(/[\n,，、;；+]+/)
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .forEach((part) => {
+          if (/(?:[（(]\s*反\s*[）)]|反\s*定向|反\s*向|^反\s*[:：]|^反(?:港澳台|香港|澳门|台湾))/i.test(part)) {
+            activeDirection = "reverse";
+          } else if (/(?:[（(]\s*正\s*[）)]|正\s*定向|正\s*向|^正\s*[:：]|^正(?:中国|全国|中国大陆|大陆))/i.test(part)) {
+            activeDirection = "positive";
+          }
+          let cityText = part
+            .replace(/[（(]\s*[正反]\s*[）)]/gi, "")
+            .replace(/[正反]\s*定向\s*[:：]?/gi, "")
+            .replace(/[正反]\s*向\s*[:：]?/gi, "")
+            .replace(/^[正反]\s*[:：]\s*/i, "");
+          if (activeDirection === "reverse") cityText = cityText.replace(/^反(?=[\u4e00-\u9fff])/i, "");
+          if (activeDirection === "positive") cityText = cityText.replace(/^正(?=[\u4e00-\u9fff])/i, "");
+          const city = normalizeCityName(cityText);
+          if (city) result[activeDirection].push(city);
+        });
+      result.positive = uniquePrograms(result.positive);
+      result.reverse = uniquePrograms(result.reverse);
+      result.neutral = uniquePrograms(result.neutral);
+      return result;
+    }
+
+    function mergeDirectionalCityTargeting(values) {
+      return (values || []).reduce((merged, value) => {
+        const parsed = parseDirectionalCityTargeting(value);
+        merged.positive.push(...parsed.positive);
+        merged.reverse.push(...parsed.reverse);
+        merged.neutral.push(...parsed.neutral);
+        return merged;
+      }, { positive: [], reverse: [], neutral: [] });
+    }
+
+    function isNationwideChinaTargeting(direction) {
+      const hasChinaPositive = direction.positive.some((city) => /^(?:中国|全国|中国大陆|大陆)$/.test(normalizeForList(city)));
+      return hasChinaPositive
+        && direction.reverse.length > 0
+        && direction.reverse.every(isHongKongMacauTaiwanTarget);
+    }
+
+    function isHongKongMacauTaiwanTarget(value) {
+      const normalized = normalizeForList(value)
+        .replace(/中国/g, "")
+        .replace(/特别行政区|地区|省/g, "");
+      if (!/(?:香港|澳门|台湾|港澳台)/.test(normalized)) return false;
+      return normalized.replace(/港澳台|香港|澳门|台湾|港|澳|台/g, "") === "";
     }
 
     function normalizeCityName(value) {
