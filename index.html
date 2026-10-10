@@ -2544,16 +2544,19 @@
         ? findClientQuantityColumn(header, quantityCandidates)
         : findHeaderColumn(header, quantityCandidates);
       const amountCol = findHeaderColumn(header, amountCandidates);
+      const greenAggregateOptions = isGreen
+        ? { excludeDiscardedOrderItems: true, header }
+        : {};
       if (quantityCol >= 0) result.quantity = isClient
         ? readClientTotalOrSum(table, headerRowIndex, quantityCol)
-        : readTotalOrSum(table, headerRowIndex, quantityCol);
+        : readTotalOrSum(table, headerRowIndex, quantityCol, greenAggregateOptions);
       if (amountCol >= 0) result.amount = isClient
         ? readClientTotalOrSum(table, headerRowIndex, amountCol)
-        : readTotalOrSum(table, headerRowIndex, amountCol);
+        : readTotalOrSum(table, headerRowIndex, amountCol, greenAggregateOptions);
       if (isGreen && result.amount == null) {
         const greenFallbackAmountCol = findHeaderColumn(header, ["total price after discount", "折后总价", "折后总价￥", "折后总价元"]);
         if (greenFallbackAmountCol >= 0) {
-          result.amount = readTotalOrSum(table, headerRowIndex, greenFallbackAmountCol);
+          result.amount = readTotalOrSum(table, headerRowIndex, greenFallbackAmountCol, greenAggregateOptions);
           if (result.amount != null) result.amountNote = "按折后总价明细汇总";
         }
       }
@@ -2669,9 +2672,25 @@
       return findHeaderColumn(header, ["total imp 000", "total imp", "total impressions", "impressions"]);
     }
 
-    function readTotalOrSum(table, headerRowIndex, colIndex) {
+    function readTotalOrSum(table, headerRowIndex, colIndex, options = {}) {
       const rows = table.rows || [];
       const dataRows = rows.slice(Math.max(headerRowIndex + 1, 0));
+      if (options.excludeDiscardedOrderItems) {
+        const header = options.header || getCombinedHeader(table, headerRowIndex);
+        const statusCol = findHeaderColumn(header, ["订单项状态", "orderitem status", "status", "状态"]);
+        if (statusCol >= 0) {
+          let foundAmount = false;
+          const total = dataRows.reduce((sum, row) => {
+            const isTotalRow = row.some((cell) => /总计|合计|小计|subtotal|sub total|grand total|total/i.test(normalizeCell(cell)));
+            if (isTotalRow) return sum;
+            const value = parseStrictAmount(row[colIndex]);
+            if (value == null) return sum;
+            foundAmount = true;
+            return normalizeForList(row[statusCol]) === "废弃" ? sum : sum + value;
+          }, 0);
+          return foundAmount ? total : null;
+        }
+      }
       const totalRow = dataRows.find((row) => row.some((cell) => /总计|合计|小计|subtotal|sub total|grand total|total/i.test(normalizeCell(cell))));
       if (totalRow) {
         const total = parseStrictAmount(totalRow[colIndex]);
@@ -2810,6 +2829,8 @@
       const years = referenceYearMonth
         ? [referenceYearMonth.year]
         : extractYearsFromPeriodText(headerPeriod || flattenTableText(table).slice(0, 800));
+      const monthDayColumns = getMonthDayScheduleDateColumns(rows, years, referenceYearMonth);
+      if (monthDayColumns.length) return monthDayColumns;
       const maxCols = Math.max(...rows.map((row) => row.length), 1);
       const dateColumns = [];
       for (let colIndex = 0; colIndex < maxCols; colIndex += 1) {
@@ -2817,6 +2838,48 @@
         if (dateItem) dateColumns.push(dateItem);
       }
       return dateColumns;
+    }
+
+    function getMonthDayScheduleDateColumns(rows, years, referenceYearMonth = null) {
+      const candidates = [];
+      for (let rowIndex = 0; rowIndex < Math.min(15, rows.length); rowIndex += 1) {
+        const entries = [];
+        (rows[rowIndex] || []).forEach((value, colIndex) => {
+          const match = normalizeCell(value).trim().match(/^(\d{1,2})\s*\/\s*(\d{1,2})$/);
+          if (!match) return;
+          const month = Number(match[1]);
+          const day = Number(match[2]);
+          if (!isValidMonthDay(month, day)) return;
+          entries.push({ month, day, colIndex });
+        });
+        if (entries.length >= 2) candidates.push({ rowIndex, entries });
+      }
+      if (!candidates.length) return [];
+
+      candidates.sort((left, right) => right.entries.length - left.entries.length);
+      const candidate = candidates[0];
+      let yearIndex = 0;
+      let year = referenceYearMonth?.year || years[yearIndex] || new Date().getFullYear();
+      let previousMonth = null;
+      return candidate.entries.map((entry) => {
+        if (previousMonth !== null && entry.month < previousMonth) {
+          yearIndex += 1;
+          year = years[yearIndex] || year + 1;
+        }
+        previousMonth = entry.month;
+        return {
+          text: `${year}年${String(entry.month).padStart(2, "0")}月${String(entry.day).padStart(2, "0")}日`,
+          date: new Date(year, entry.month - 1, entry.day).getTime(),
+          colIndex: entry.colIndex,
+          headerRowIndex: candidate.rowIndex
+        };
+      });
+    }
+
+    function isValidMonthDay(month, day) {
+      if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+      const check = new Date(2000, month - 1, day);
+      return check.getMonth() === month - 1 && check.getDate() === day;
     }
 
     function getFlexibleDateInfoForColumn(rows, colIndex, years, referenceYearMonth = null) {
@@ -2836,8 +2899,10 @@
         if (!currentMonthInfo) continue;
         for (const dayOffset of [1, 2]) {
           const dayRowIndex = monthRowIndex + dayOffset;
-          const day = parseInt(normalizeCell(rows[dayRowIndex] && rows[dayRowIndex][colIndex]), 10);
-          if (!Number.isFinite(day) || day < 1 || day > 31) continue;
+          const dayText = normalizeCell(rows[dayRowIndex] && rows[dayRowIndex][colIndex]).trim();
+          if (!/^\d{1,2}$/.test(dayText)) continue;
+          const day = Number(dayText);
+          if (!isValidMonthDay(currentMonthInfo.month, day)) continue;
           const date = new Date(currentMonthInfo.year, currentMonthInfo.month - 1, day).getTime();
           if (!Number.isFinite(date)) continue;
           return {
