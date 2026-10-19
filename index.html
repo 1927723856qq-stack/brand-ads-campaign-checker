@@ -218,12 +218,42 @@
 
     .adjustment-summary-grid {
       display: grid;
-      grid-template-columns: minmax(0, 5fr) minmax(0, 3fr);
+      grid-template-columns: minmax(0, 1fr);
       gap: 16px;
     }
 
     .adjustment-summary-grid .field {
       margin-bottom: 0;
+    }
+
+    .summary.adjustment-metrics {
+      grid-template-columns: repeat(4, minmax(96px, 0.72fr)) minmax(360px, 2.35fr);
+      align-items: stretch;
+    }
+
+    .summary.adjustment-metrics > .metric {
+      height: 74px;
+      min-height: 74px;
+      align-self: end;
+    }
+
+    .field.adjustment-volume-field {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 6px;
+      min-width: 0;
+      margin-bottom: 0;
+    }
+
+    .adjustment-volume-field > label {
+      color: #344054;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .adjustment-volume-field .scenario-preview {
+      min-height: 74px;
+      max-height: 124px;
     }
 
     .panel {
@@ -559,8 +589,37 @@
       max-height: 220px;
     }
 
+    .adjustment-summary-grid .scenario-preview {
+      max-height: none;
+    }
+
     .scenario-preview .no-change-result {
       white-space: normal;
+    }
+
+    .scenario-preview > .scenario-notice:first-child {
+      margin-top: 0;
+    }
+
+    .scenario-notice.is-clickable {
+      cursor: pointer;
+      transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+    }
+
+    .scenario-notice.is-clickable:hover,
+    .scenario-notice.is-clickable:focus-visible {
+      border-color: #d92d20;
+      box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.12);
+      outline: none;
+      transform: translateY(-1px);
+    }
+
+    .scenario-jump-hint {
+      display: block;
+      margin-top: 8px;
+      color: #7a271a;
+      font-size: 12px;
+      font-weight: 650;
     }
 
     .scenario-line {
@@ -602,6 +661,40 @@
       outline: 3px solid #2563eb;
       outline-offset: -3px;
       font-weight: 750;
+    }
+
+    .related-preview-row td {
+      background: #f3f7ff !important;
+      box-shadow: inset 0 1px 0 #8eb5e8, inset 0 -1px 0 #8eb5e8;
+    }
+
+    .related-preview-row .yellow-cell {
+      background: #fff39a !important;
+    }
+
+    .preview-focus-summary {
+      margin: 10px 0;
+      padding: 12px 14px;
+      border: 1px solid #b9d4f4;
+      border-left: 5px solid #2563eb;
+      border-radius: 6px;
+      background: #eef5ff;
+      color: #17365d;
+    }
+
+    .preview-focus-summary strong {
+      display: block;
+      margin-bottom: 7px;
+      font-size: 13px;
+    }
+
+    .preview-focus-summary ul {
+      display: grid;
+      gap: 5px;
+      margin: 0;
+      padding-left: 20px;
+      font-size: 12px;
+      line-height: 1.55;
     }
 
     .abnormal-filter-grid {
@@ -750,6 +843,7 @@
 
     @media (max-width: 920px) {
       .layout, .summary { grid-template-columns: 1fr; }
+      .summary.adjustment-metrics { grid-template-columns: 1fr; }
       .upload-zone { grid-template-columns: 1fr; }
       .adjustment-summary-grid { grid-template-columns: 1fr; }
       .topbar { align-items: flex-start; flex-direction: column; }
@@ -922,17 +1016,16 @@
               <div class="metric-value" id="failCount">0</div>
               <div class="metric-label" id="failCountLabel">异常行数</div>
             </div>
+            <div class="field adjustment-volume-field adjustment-only hidden">
+              <label>检测到预定量调整</label>
+              <div id="adjustmentVolumePreview" class="preview scenario-preview">预定量有调整时，将在这里显示预定量和购买量比例。</div>
+            </div>
           </div>
 
           <div class="adjustment-summary-grid adjustment-only hidden">
             <div class="field">
               <label>检测到改单场景</label>
               <div id="adjustmentScenarioPreview" class="preview scenario-preview">上传绿排期并识别后，将在这里显示检测到的改单场景。</div>
-            </div>
-
-            <div class="field">
-              <label>检测到预定量调整</label>
-              <div id="adjustmentVolumePreview" class="preview scenario-preview">预定量有调整时，将在这里显示预定量和购买量比例。</div>
             </div>
           </div>
 
@@ -1185,6 +1278,7 @@
     const toolNoticeArea = document.querySelector("#toolNoticeArea");
     const brandSummaryPanel = document.querySelector("#brandSummaryPanel");
     const settlementInsight = document.querySelector("#settlementInsight");
+    const summaryMetrics = document.querySelector("#summary");
     const adjustmentScenarioPreview = document.querySelector("#adjustmentScenarioPreview");
     const adjustmentVolumePreview = document.querySelector("#adjustmentVolumePreview");
     const brandToolTab = document.querySelector("#brandToolTab");
@@ -1222,6 +1316,8 @@
       freezeColsInput.addEventListener("change", applyFreeze);
       resultBody.addEventListener("click", handleResultRowClick);
       abnormalBody.addEventListener("click", handleResultRowClick);
+      adjustmentScenarioPreview.addEventListener("click", handleScenarioNoticeActivate);
+      adjustmentScenarioPreview.addEventListener("keydown", handleScenarioNoticeActivate);
       [abnormalFieldFilter, abnormalValueFilter, abnormalMessageFilter].forEach((select) => {
         select.addEventListener("change", handleAbnormalColumnFilter);
       });
@@ -1331,6 +1427,7 @@
       document.querySelectorAll(".adjustment-only").forEach((node) => {
         node.classList.toggle("hidden", tool !== "adjustment");
       });
+      summaryMetrics.classList.toggle("adjustment-metrics", tool === "adjustment");
 
       appTitle.textContent = getToolTitle(tool);
       configTitle.textContent = tool === "brand" ? "核对配置" : "修改字段识别";
@@ -1698,8 +1795,11 @@
           const focusCellClass = isFocusedPreviewCell(fileName, table.name, sourceRowIndex + 1, sourceColIndex) ? " focused-preview-cell" : "";
           return `<td class="${yellowClass}${focusCellClass}" data-row="${sourceRowIndex}" data-col="${sourceColIndex}" title="${escapeHtml(row[sourceColIndex])}">${escapeHtml(row[sourceColIndex])}</td>`;
         }).join("");
-        const focusedClass = isFocusedPreviewRow(fileName, table.name, sourceRowIndex + 1) ? " class=\"focused-preview-row\"" : "";
-        return `<tr${focusedClass}>${cells}</tr>`;
+        const rowClasses = [];
+        if (isFocusedPreviewRow(fileName, table.name, sourceRowIndex + 1)) rowClasses.push("focused-preview-row");
+        else if (isRelatedPreviewRow(fileName, table.name, sourceRowIndex + 1)) rowClasses.push("related-preview-row");
+        const classAttr = rowClasses.length ? ` class="${rowClasses.join(" ")}"` : "";
+        return `<tr${classAttr}>${cells}</tr>`;
       }).join("");
       const noteHtml = `
         <div class="preprocess-note">
@@ -1711,6 +1811,7 @@
       return `
         <p class="hint">${escapeHtml(table.name)}</p>
         ${noteHtml}
+        ${renderPreviewFocusSummary(fileName, table.name)}
         <table class="preview-table" data-table-id="${tableId}" data-preview-file="${escapeHtml(fileName)}" data-preview-sheet="${escapeHtml(table.name)}">
           <colgroup>${colgroup}</colgroup>
           <thead><tr>${headerCells}</tr></thead>
@@ -1731,11 +1832,20 @@
         : 0;
       const selectedRowIndex = selectedRowNumber > 0 ? selectedRowNumber - 1 : -1;
       const picked = new Set(visibleRowIndexes.slice(0, PREVIEW_ROW_LIMIT));
+      const groupTargets = getPreviewGroupTargets(fileName, table.name);
 
-      if (selectedRowIndex >= 0) {
+      if (selectedRowIndex >= 0 || groupTargets.length) {
         for (let index = 0; index < Math.min(13, rows.length); index += 1) {
           if (visibleRowIndexes.includes(index)) picked.add(index);
         }
+      }
+
+      groupTargets.forEach((target) => {
+        const rowIndex = Number(target.rowNumber) - 1;
+        if (rowIndex >= 0 && rowIndex < rows.length) picked.add(rowIndex);
+      });
+
+      if (selectedRowIndex >= 0) {
         [selectedRowIndex - 1, selectedRowIndex, selectedRowIndex + 1].forEach((index) => {
           if (index >= 0 && index < rows.length) picked.add(index);
         });
@@ -1759,7 +1869,37 @@
           if (index >= 0 && index < maxCols) picked.add(index);
         });
       }
+      getPreviewGroupTargets(fileName, table.name).forEach((target) => {
+        (target.colIndexes || []).forEach((index) => {
+          if (index >= 0 && index < maxCols) picked.add(index);
+        });
+      });
       return Array.from(picked).sort((a, b) => a - b);
+    }
+
+    function getPreviewGroupTargets(fileName, sheetName) {
+      if (!state.previewFocus || !Array.isArray(state.previewFocus.groupTargets)) return [];
+      return state.previewFocus.groupTargets.filter((target) => (
+        target.file === fileName && target.sheet === sheetName
+      ));
+    }
+
+    function renderPreviewFocusSummary(fileName, sheetName) {
+      const targets = getPreviewGroupTargets(fileName, sheetName);
+      if (!targets.length) return "";
+      const message = String(state.previewFocus.groupMessage || "此类报错")
+        .replace(/^⚠\s*检测到改单场景：/, "")
+        .replace(/^⚠\s*/, "");
+      return `
+        <div class="preview-focus-summary">
+          <strong>当前查看：${escapeHtml(message)}</strong>
+          <ul>
+            ${targets.map((target) => `
+              <li>第 ${escapeHtml(target.rowNumber)} 行｜${escapeHtml(target.role)}｜订单项ID ${escapeHtml(target.orderId || "未读取")}｜${escapeHtml(target.orderName)}</li>
+            `).join("")}
+          </ul>
+        </div>
+      `;
     }
 
     function isFocusedPreviewRow(fileName, sheetName, rowNumber) {
@@ -1767,6 +1907,11 @@
         && state.previewFocus.file === fileName
         && state.previewFocus.sheet === sheetName
         && Number(state.previewFocus.rowNumber) === Number(rowNumber));
+    }
+
+    function isRelatedPreviewRow(fileName, sheetName, rowNumber) {
+      return !isFocusedPreviewRow(fileName, sheetName, rowNumber)
+        && getPreviewGroupTargets(fileName, sheetName).some((target) => Number(target.rowNumber) === Number(rowNumber));
     }
 
     function isFocusedPreviewCell(fileName, sheetName, rowNumber, colIndex) {
@@ -3312,7 +3457,8 @@
           notices.push({
             message: `⚠ 新增补量订单项与原订单项“${originalLabel}”的${mismatchedFields.join("、")}不一致`,
             severity: "bad",
-            changedFieldLabel: mismatchedFields.join("、")
+            changedFieldLabel: mismatchedFields.join("、"),
+            previewItems: buildScenarioPreviewTargets(group.items, true)
           });
         }
 
@@ -3325,7 +3471,8 @@
           notices.push({
             message: `⚠ 新增补量订单项投放目标为“优选点击”，但原订单项“${originalLabel}”不是“优选点击”`,
             severity: "bad",
-            changedFieldLabel: "投放目标"
+            changedFieldLabel: "投放目标",
+            previewItems: buildScenarioPreviewTargets(group.items, true)
           });
         }
 
@@ -3343,7 +3490,8 @@
           notices.push({
             message: `⚠ 新增补量订单项${uniquePlatformProblems.join("；")}`,
             severity: "bad",
-            changedFieldLabel: "选中平台"
+            changedFieldLabel: "选中平台",
+            previewItems: buildScenarioPreviewTargets(group.items, true)
           });
         }
 
@@ -3354,7 +3502,8 @@
           notices.push({
             message: `⚠ 新增补量订单项字段中出现${forbiddenValues.join("、")}`,
             severity: "bad",
-            changedFieldLabel: "高风险字段值"
+            changedFieldLabel: "高风险字段值",
+            previewItems: buildScenarioPreviewTargets(group.items, true)
           });
         }
       });
@@ -3577,21 +3726,24 @@
         notices.push({
           message: `⚠ 新增补量订单项周期不在原订单项投放周期范围内，请排查（${newOutside.length}个订单项）`,
           severity: "bad",
-          changedFieldLabel: "细排"
+          changedFieldLabel: "细排",
+          previewItems: buildScenarioPreviewTargets(newOutside, true)
         });
       }
       if (existingOutside.length) {
         notices.push({
           message: `⚠ 补量订单项周期不在原订单项投放周期范围内，请排查（${existingOutside.length}个订单项）`,
           severity: "bad",
-          changedFieldLabel: "细排"
+          changedFieldLabel: "细排",
+          previewItems: buildScenarioPreviewTargets(existingOutside, true)
         });
       }
       if (missingOriginal.length) {
         notices.push({
           message: `⚠ 有补量订单项无法找到关联原订单项或有效投放周期，请排查（${missingOriginal.length}个订单项）`,
           severity: "bad",
-          changedFieldLabel: "关联订单项ID、细排"
+          changedFieldLabel: "关联订单项ID、细排",
+          previewItems: buildScenarioPreviewTargets(missingOriginal, true)
         });
       }
       return notices;
@@ -3604,6 +3756,81 @@
         if (!rows.has(key)) rows.set(key, item);
       });
       return Array.from(rows.values());
+    }
+
+    function buildScenarioPreviewTargets(items, includeRelations) {
+      const targets = [];
+      uniqueAdjustedOrderItems(items || []).forEach((item) => {
+        const itemRole = item.isReplenishment ? "补量订单项" : "原订单项";
+        const primary = buildScenarioPreviewTarget(item, item.sourceRow, itemRole, item.colIndex, true);
+        if (primary) targets.push(primary);
+        if (!includeRelations) return;
+        findRelatedOrderRows(item).forEach(({ row, role }) => {
+          const related = buildScenarioPreviewTarget(item, row, role, item.colIndex, false);
+          if (related) targets.push(related);
+        });
+      });
+
+      const uniqueTargets = new Map();
+      targets.forEach((target) => {
+        const key = `${target.file}｜${target.sheet}｜${target.rowNumber}`;
+        if (!uniqueTargets.has(key) || (!uniqueTargets.get(key).isPrimary && target.isPrimary)) {
+          uniqueTargets.set(key, target);
+        }
+      });
+      return Array.from(uniqueTargets.values()).sort((left, right) => (
+        Number(right.isPrimary) - Number(left.isPrimary)
+        || left.file.localeCompare(right.file, "zh-CN")
+        || left.sheet.localeCompare(right.sheet, "zh-CN")
+        || left.rowNumber - right.rowNumber
+      ));
+    }
+
+    function buildScenarioPreviewTarget(item, row, role, changedColIndex, isPrimary) {
+      if (!item || !item.sourceTable || !row) return null;
+      const table = item.sourceTable;
+      const rowIndex = (table.rows || []).indexOf(row);
+      if (rowIndex < 0) return null;
+      const orderIdCol = findOrderIdColumn(table);
+      const orderNameCol = findOrderNameColumn(table);
+      const associatedIdCol = getGreenFieldColumn(table, "associatedOrderItemId");
+      const colIndexes = Array.from(new Set([
+        changedColIndex,
+        orderIdCol,
+        orderNameCol,
+        associatedIdCol
+      ].filter((index) => Number.isInteger(index) && index >= 0)));
+      return {
+        file: item.file,
+        sheet: table.name,
+        rowNumber: rowIndex + 1,
+        orderId: normalizeCell(row[orderIdCol]),
+        orderName: normalizeCell(row[orderNameCol]) || `第 ${rowIndex + 1} 行`,
+        role,
+        isPrimary: Boolean(isPrimary),
+        colIndexes
+      };
+    }
+
+    function findRelatedOrderRows(item) {
+      if (!item || !item.sourceTable || !item.sourceRow) return [];
+      if (item.isReplenishment) {
+        const originalRow = findOriginalOrderRow(item);
+        return originalRow ? [{ row: originalRow, role: "关联原订单项" }] : [];
+      }
+
+      const table = item.sourceTable;
+      const orderId = normalizeCell(getExactFieldValue(table, item.sourceRow, GREEN_FIELD_ALIASES.orderItemId));
+      if (!orderId) return [];
+      return (table.rows || [])
+        .slice(TIME_SLOT_DETECT_START_ROW_NUMBER - 1)
+        .filter((row) => isReplenishmentOrderRow(table, row))
+        .filter((row) => normalizeCell(getExactFieldValue(
+          table,
+          row,
+          GREEN_FIELD_ALIASES.associatedOrderItemId
+        )) === orderId)
+        .map((row) => ({ row, role: "关联补量订单项" }));
     }
 
     function checkReplenishmentPeriodWithinOriginal(item) {
@@ -3628,11 +3855,15 @@
     function appendAdjustmentScenarioNotices(scenario, notices) {
       const allNotices = [];
       if (scenario && scenario.message) {
-        allNotices.push({
-          message: scenario.message,
-          severity: scenario.severity || "ok",
-          changedFieldLabel: scenario.changedFieldLabel || ""
-        });
+        const scenarioNotices = Array.isArray(scenario.notices) && scenario.notices.length
+          ? scenario.notices
+          : [{
+              message: scenario.message,
+              severity: scenario.severity || "ok",
+              changedFieldLabel: scenario.changedFieldLabel || "",
+              previewItems: scenario.previewItems || []
+            }];
+        scenarioNotices.forEach((notice) => allNotices.push(notice));
       }
       (notices || []).forEach((notice) => {
         if (!notice || !notice.message || allNotices.some((item) => item.message === notice.message)) return;
@@ -3713,7 +3944,15 @@
       return {
         ...scenario,
         changedFieldLabel: changedFields.join("、"),
-        message: [scenario.message, prioritySummary].filter(Boolean).join("；")
+        message: [scenario.message, prioritySummary].filter(Boolean).join("；"),
+        notices: Array.isArray(scenario.notices) && scenario.notices.length
+          ? [...scenario.notices, {
+              message: prioritySummary,
+              severity: "ok",
+              changedFieldLabel: "优先级",
+              previewItems: []
+            }]
+          : scenario.notices
       };
     }
 
@@ -3721,40 +3960,51 @@
       const shrinkPairs = timeSlotPairs.filter((pair) => isBlankScheduleValue(pair.scheduleValue));
       const expansionPairs = timeSlotPairs.filter((pair) => !isBlankScheduleValue(pair.scheduleValue));
       const messages = [];
+      const notices = [];
       let severity = "ok";
+      const addNotice = (message, noticeSeverity, pairs) => {
+        messages.push(message);
+        notices.push({
+          message,
+          severity: noticeSeverity,
+          changedFieldLabel: "预定量、细排、时段",
+          previewItems: noticeSeverity === "bad"
+            ? buildScenarioPreviewTargets((pairs || []).map((pair) => pair.item), true)
+            : []
+        });
+      };
 
-      const replenishmentShrink = shrinkPairs.some((pair) => pair.item.isReplenishment);
+      const replenishmentShrinkPairs = shrinkPairs.filter((pair) => pair.item.isReplenishment);
       const originalShrinkPairs = shrinkPairs.filter((pair) => !pair.item.isReplenishment);
       const originalExpansionPairs = expansionPairs.filter((pair) => !pair.item.isReplenishment);
       const softPlaceholderDelayKeys = findSoftPlaceholderDelayKeys(originalShrinkPairs, originalExpansionPairs);
-      const originalShrink = originalShrinkPairs.some((pair) => !softPlaceholderDelayKeys.has(adjustmentItemKey(pair.item)));
-      if (replenishmentShrink) messages.push("检测到改单场景：补量订单项日期缩减");
-      if (softPlaceholderDelayKeys.size) messages.push("检测到改单场景：软性占位延期");
-      if (originalShrink) {
-        messages.push("⚠ 检测到改单场景：原订单项日期缩减，请排查原因");
+      const originalShrinkRiskPairs = originalShrinkPairs.filter((pair) => !softPlaceholderDelayKeys.has(adjustmentItemKey(pair.item)));
+      if (replenishmentShrinkPairs.length) addNotice("检测到改单场景：补量订单项日期缩减", "ok", replenishmentShrinkPairs);
+      if (softPlaceholderDelayKeys.size) addNotice("检测到改单场景：软性占位延期", "ok", []);
+      if (originalShrinkRiskPairs.length) {
+        addNotice("⚠ 检测到改单场景：原订单项日期缩减，请排查原因", "bad", originalShrinkRiskPairs);
         severity = "bad";
       }
 
       const replenishmentExpansion = expansionPairs.filter((pair) => pair.item.isReplenishment);
-      const originalExpansion = originalExpansionPairs.some((pair) => !softPlaceholderDelayKeys.has(adjustmentItemKey(pair.item)));
       const nonSoftOriginalExpansionPairs = originalExpansionPairs.filter((pair) => !softPlaceholderDelayKeys.has(adjustmentItemKey(pair.item)));
       const isDelayReplenishment = replenishmentExpansion.length && nonSoftOriginalExpansionPairs.length;
 
       if (isDelayReplenishment) {
-        messages.push("检测到改单场景：延期补量");
+        addNotice("检测到改单场景：延期补量", "ok", []);
         const delayPeriod = summarizeChangedSchedulePeriods(expansionPairs);
-        if (delayPeriod) messages.push(`延期补量周期：${delayPeriod}`);
+        if (delayPeriod) addNotice(`延期补量周期：${delayPeriod}`, "ok", []);
       } else if (replenishmentExpansion.length) {
-        const outside = replenishmentExpansion.some((pair) => !isExpansionWithinOriginalPeriod(pair));
-        if (outside) {
-          messages.push("⚠ 检测到改单场景：补量订单项日期扩充，新增日期不在原定单项投放周期内，请补充客户确认邮件");
+        const outsidePairs = replenishmentExpansion.filter((pair) => !isExpansionWithinOriginalPeriod(pair));
+        if (outsidePairs.length) {
+          addNotice("⚠ 检测到改单场景：补量订单项日期扩充，新增日期不在原定单项投放周期内，请补充客户确认邮件", "bad", outsidePairs);
           severity = "bad";
         } else {
-          messages.push("检测到改单场景：补量订单项日期扩充");
+          addNotice("检测到改单场景：补量订单项日期扩充", "ok", replenishmentExpansion);
         }
       }
-      if (originalExpansion && !isDelayReplenishment) {
-        messages.push("⚠ 检测到改单场景：原订单项日期扩充，请走正式改单");
+      if (nonSoftOriginalExpansionPairs.length && !isDelayReplenishment) {
+        addNotice("⚠ 检测到改单场景：原订单项日期扩充，请走正式改单", "bad", nonSoftOriginalExpansionPairs);
         severity = "bad";
       }
 
@@ -3763,7 +4013,8 @@
         changedFieldLabel: "预定量、细排、时段",
         severity,
         ratios,
-        message: uniquePrograms(messages).join("；") || "检测到改单场景：调整铺量"
+        message: uniquePrograms(messages).join("；") || "检测到改单场景：调整铺量",
+        notices
       };
     }
 
@@ -4395,9 +4646,14 @@
           message: state.adjustmentScenario.message,
           severity: state.adjustmentScenario.severity
         }];
-        adjustmentScenarioPreview.innerHTML = notices.map((notice) => {
+        adjustmentScenarioPreview.innerHTML = notices.map((notice, noticeIndex) => {
           const toneClass = notice.severity === "bad" ? "danger-summary" : notice.severity === "warn" ? "warn-summary" : "";
-          return `<div class="no-change-result scenario-notice ${toneClass}">${formatScenarioPreviewLines(notice.message)}</div>`;
+          const canJump = notice.severity === "bad" && Array.isArray(notice.previewItems) && notice.previewItems.length;
+          const jumpAttrs = canJump
+            ? ` role="button" tabindex="0" class="no-change-result scenario-notice ${toneClass} is-clickable" data-scenario-notice-index="${noticeIndex}" title="点击后在绿排期预览中查看此类报错的订单项和关联订单项"`
+            : ` class="no-change-result scenario-notice ${toneClass}"`;
+          const jumpHint = canJump ? `<span class="scenario-jump-hint">点击查看此类报错的订单项及关联订单项</span>` : "";
+          return `<div${jumpAttrs}>${formatScenarioPreviewLines(notice.message)}${jumpHint}</div>`;
         }).join("");
       }
 
@@ -4529,6 +4785,34 @@
       return ` class="clickable-result-row" data-preview-file="${escapeHtml(item.previewFile)}" data-preview-sheet="${escapeHtml(item.previewSheet)}" data-preview-row="${escapeHtml(item.previewRowNumber)}" data-preview-address="${escapeHtml(item.address || "")}" title="点击后在绿排期预览中显示这一行"`;
     }
 
+    function handleScenarioNoticeActivate(event) {
+      const noticeNode = event.target.closest("[data-scenario-notice-index]");
+      if (!noticeNode) return;
+      if (event.type === "keydown" && !["Enter", " "].includes(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const notices = state.adjustmentScenario && Array.isArray(state.adjustmentScenario.notices)
+        ? state.adjustmentScenario.notices
+        : [];
+      const notice = notices[Number(noticeNode.dataset.scenarioNoticeIndex)];
+      const targets = notice && Array.isArray(notice.previewItems) ? notice.previewItems : [];
+      if (!targets.length) return;
+      const first = targets[0];
+      state.previewFocus = {
+        file: first.file,
+        sheet: first.sheet,
+        rowNumber: Number(first.rowNumber),
+        colIndexes: first.colIndexes || [],
+        groupTargets: targets,
+        groupMessage: notice.message
+      };
+      renderFiles();
+      initResizableColumns();
+      applyFreeze();
+      const target = document.querySelector(".focused-preview-cell") || document.querySelector(".focused-preview-row");
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+    }
+
     function handleResultRowClick(event) {
       const row = event.target.closest("[data-preview-row]");
       if (!row) return;
@@ -4564,7 +4848,7 @@
 
     function handleDocumentClick(event) {
       if (!state.previewFocus) return;
-      if (event.target.closest(".preview-table-wrap, .result-table-wrap, button, input, textarea, select, label, .drop-zone")) return;
+      if (event.target.closest(".preview-table-wrap, .result-table-wrap, .preview-focus-summary, .scenario-notice, button, input, textarea, select, label, .drop-zone")) return;
       clearPreviewFocus();
     }
 
