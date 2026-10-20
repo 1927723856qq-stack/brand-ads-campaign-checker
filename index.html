@@ -2692,7 +2692,7 @@
         ? ["paid quantity", "purchased quantity", "购买数量", "购买总量", "总数量", "contract amount", "投放量", "数量", "quantity", "qty", "count"]
         : ["contract amount", "购买数量", "purchased quantity", "quantity", "amount", "数量"];
       const amountCandidates = isClient
-        ? ["total package net", "total net cost", "total net price", "net total", "paid total", "payable amount", "折后净总价", "总净价", "净总价", "实付总金额", "实结金额", "投放金额", "购买总价", "折后总价", "合同金额", "净额", "金额"]
+        ? ["total package net", "total net cost", "total net price", "net total", "paid total", "payable amount", "折后净总价", "总净价", "净总价", "实付总金额", "实结金额", "投放金额", "购买总价", "折后总价", "合同金额", "净额", "金额", "package cost", "package cos"]
         : isExecution
           ? ["购买总价", "购买总价￥", "购买总价元", "total net price"]
           : isGreen
@@ -2701,7 +2701,8 @@
       const quantityCol = isClient
         ? findClientQuantityColumn(header, quantityCandidates)
         : findHeaderColumn(header, quantityCandidates);
-      const amountCol = findHeaderColumn(header, amountCandidates);
+      const amountCols = findHeaderColumns(header, amountCandidates);
+      const amountCol = amountCols[0] ?? -1;
       const greenAggregateOptions = isGreen
         ? { excludeDiscardedOrderItems: true, header }
         : {};
@@ -2709,7 +2710,7 @@
         ? readClientTotalOrSum(table, headerRowIndex, quantityCol)
         : readTotalOrSum(table, headerRowIndex, quantityCol, greenAggregateOptions);
       if (amountCol >= 0) result.amount = isClient
-        ? readClientTotalOrSum(table, headerRowIndex, amountCol)
+        ? readClientAmount(table, headerRowIndex, amountCols)
         : readTotalOrSum(table, headerRowIndex, amountCol, greenAggregateOptions);
       if (isGreen && result.amount == null) {
         const greenFallbackAmountCol = findHeaderColumn(header, ["total price after discount", "折后总价", "折后总价￥", "折后总价元"]);
@@ -2814,6 +2815,26 @@
       return -1;
     }
 
+    function findHeaderColumns(header, candidates) {
+      const normalizedHeader = (header || []).map((cell) => normalizeForList(cell).toLowerCase());
+      const normalizedCandidates = candidates.map((candidate) => normalizeForList(candidate).toLowerCase()).filter(Boolean);
+      const columns = [];
+      const addColumn = (colIndex) => {
+        if (colIndex >= 0 && !columns.includes(colIndex)) columns.push(colIndex);
+      };
+      normalizedCandidates.forEach((candidate) => {
+        normalizedHeader.forEach((text, colIndex) => {
+          if (text === candidate) addColumn(colIndex);
+        });
+      });
+      normalizedCandidates.forEach((candidate) => {
+        normalizedHeader.forEach((text, colIndex) => {
+          if (text.includes(candidate)) addColumn(colIndex);
+        });
+      });
+      return columns;
+    }
+
     function findClientQuantityColumn(header, candidates) {
       const normalizedHeader = (header || []).map((cell) => normalizeForList(cell).toLowerCase());
       const normalizedCandidates = candidates.map((candidate) => normalizeForList(candidate).toLowerCase());
@@ -2861,6 +2882,15 @@
       return values.reduce((sum, value) => sum + value, 0);
     }
 
+    function readClientAmount(table, headerRowIndex, colIndexes) {
+      const columns = Array.from(new Set((colIndexes || []).filter((colIndex) => colIndex >= 0)));
+      for (const colIndex of columns) {
+        const value = readClientTotalOrSum(table, headerRowIndex, colIndex);
+        if (value != null) return value;
+      }
+      return null;
+    }
+
     function readClientTotalOrSum(table, headerRowIndex, colIndex) {
       const rows = table.rows || [];
       const cells = table.cells || [];
@@ -2873,6 +2903,46 @@
         if (value != null && formula && sameColumnSum.test(formula)) return value;
       }
       return readTotalOrSum(table, headerRowIndex, colIndex);
+    }
+
+    function isDateOrWeekAnchorCell(value) {
+      const tokens = normalizeCell(value)
+        .toLowerCase()
+        .split(/[\s/|\\、,，:：()（）\[\]]+/)
+        .filter(Boolean);
+      return tokens.some((token) => ["日期", "星期", "周", "date", "dates", "day", "weekday", "week"].includes(token));
+    }
+
+    function countExplicitDates(text) {
+      const value = normalizeCell(text);
+      const delimited = [...value.matchAll(/20\d{2}[年\/.\-]\d{1,2}[月\/.\-]\d{1,2}日?/g)].length;
+      const compact = [...value.matchAll(/20\d{6}/g)].length;
+      return delimited + compact;
+    }
+
+    function isLikelyPeriodRow(text) {
+      const value = normalizeForList(text).toLowerCase();
+      return ["campaign period", "flight period", "schedule period", "投放周期", "排期周期", "投放日期", "投放时间"]
+        .some((label) => value.includes(normalizeForList(label).toLowerCase()));
+    }
+
+    function findPeriodAboveDateWeekRows(table) {
+      const rows = table.rows || [];
+      const anchorRows = [];
+      rows.forEach((row, rowIndex) => {
+        if ((row || []).some(isDateOrWeekAnchorCell)) anchorRows.push(rowIndex);
+      });
+      if (!anchorRows.length) return "";
+
+      for (const anchorRowIndex of anchorRows) {
+        for (let rowIndex = anchorRowIndex - 1; rowIndex >= 0; rowIndex -= 1) {
+          const rowText = (rows[rowIndex] || []).map(normalizeCell).join(" ");
+          const period = findPeriodInText(rowText);
+          if (!period) continue;
+          if (countExplicitDates(rowText) >= 2 || isLikelyPeriodRow(rowText)) return period;
+        }
+      }
+      return "";
     }
 
     function parseStrictAmount(value) {
@@ -3162,6 +3232,8 @@
     }
 
     function findHeaderPeriodInTable(table) {
+      const anchoredPeriod = findPeriodAboveDateWeekRows(table);
+      if (anchoredPeriod) return anchoredPeriod;
       const headerText = (table.rows || [])
         .slice(0, 12)
         .map((row) => row.map(normalizeCell).join(" "))
