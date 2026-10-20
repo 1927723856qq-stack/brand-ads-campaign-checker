@@ -1915,8 +1915,11 @@
     }
 
     function isFocusedPreviewCell(fileName, sheetName, rowNumber, colIndex) {
-      return Boolean(isFocusedPreviewRow(fileName, sheetName, rowNumber)
-        && Array.isArray(state.previewFocus.colIndexes)
+      if (!isFocusedPreviewRow(fileName, sheetName, rowNumber)) return false;
+      if (Number.isInteger(state.previewFocus.focusColIndex)) {
+        return Number(state.previewFocus.focusColIndex) === Number(colIndex);
+      }
+      return Boolean(Array.isArray(state.previewFocus.colIndexes)
         && state.previewFocus.colIndexes.includes(colIndex));
     }
 
@@ -3495,6 +3498,7 @@
       )));
       const groups = buildNewReplenishmentGroups(newReplenishmentItems);
       const notices = [];
+      const priorityMismatchGroups = new Map();
 
       groups.forEach((group) => {
         if (!group.originalRow) return;
@@ -3504,8 +3508,7 @@
         const mismatchedFields = [];
         const pairwiseFields = [
           { label: "净单价", aliases: ["折后单价(￥)", "折后单价", "净单价", "Unit Price after discount (RMB)"], numeric: true },
-          { label: "频次控制", aliases: ["频次控制"] },
-          { label: "优先级", aliases: ["优先级"] }
+          { label: "频次控制", aliases: ["频次控制"] }
         ];
 
         pairwiseFields.forEach((field) => {
@@ -3516,6 +3519,28 @@
             field.numeric
           ));
           if (mismatch) mismatchedFields.push(field.label);
+        });
+
+        const originalPriority = normalizeCell(getFieldValue(group.sourceTable, group.originalRow, ["优先级"]));
+        group.items.forEach((item) => {
+          const replenishmentPriority = normalizeCell(getFieldValue(item.sourceTable, item.sourceRow, ["优先级"]));
+          if (fieldValuesEqual(originalPriority, replenishmentPriority, false)) return;
+          const originalDisplay = originalPriority || "未设置";
+          const replenishmentDisplay = replenishmentPriority || "未设置";
+          const priorityKey = `${normalizeForList(originalDisplay).toLowerCase()}｜${normalizeForList(replenishmentDisplay).toLowerCase()}`;
+          if (!priorityMismatchGroups.has(priorityKey)) {
+            priorityMismatchGroups.set(priorityKey, {
+              originalPriority: originalDisplay,
+              replenishmentPriority: replenishmentDisplay,
+              items: new Map()
+            });
+          }
+          const orderId = normalizeCell(item.orderId)
+            || normalizeCell(getExactFieldValue(item.sourceTable, item.sourceRow, GREEN_FIELD_ALIASES.orderItemId));
+          const itemKey = orderId
+            ? `${item.file}｜${item.sheet}｜${orderId}`
+            : adjustmentItemKey(item);
+          priorityMismatchGroups.get(priorityKey).items.set(itemKey, item);
         });
 
         const originalCityTargeting = getFieldValue(group.sourceTable, group.originalRow, ["地域定向", "定向城市", "城市定向"]);
@@ -3579,6 +3604,21 @@
           });
         }
       });
+
+      Array.from(priorityMismatchGroups.values())
+        .sort((left, right) => (
+          left.originalPriority.localeCompare(right.originalPriority, "zh-CN")
+          || left.replenishmentPriority.localeCompare(right.replenishmentPriority, "zh-CN")
+        ))
+        .forEach((group) => {
+          const items = Array.from(group.items.values());
+          notices.push({
+            message: `⚠ 新增补量订单项与原订单项优先级不一致：【${group.originalPriority}】→【${group.replenishmentPriority}】（${items.length}个订单项）`,
+            severity: "bad",
+            changedFieldLabel: "优先级",
+            previewItems: buildScenarioPreviewTargets(items, true, ["优先级"])
+          });
+        });
 
       return notices;
     }
@@ -3830,15 +3870,19 @@
       return Array.from(rows.values());
     }
 
-    function buildScenarioPreviewTargets(items, includeRelations) {
+    function buildScenarioPreviewTargets(items, includeRelations, focusFieldAliases = []) {
       const targets = [];
       uniqueAdjustedOrderItems(items || []).forEach((item) => {
+        const fieldColIndex = focusFieldAliases.length
+          ? findFieldColumn(item.sourceTable, focusFieldAliases)
+          : -1;
+        const focusColIndex = fieldColIndex >= 0 ? fieldColIndex : item.colIndex;
         const itemRole = item.isReplenishment ? "补量订单项" : "原订单项";
-        const primary = buildScenarioPreviewTarget(item, item.sourceRow, itemRole, item.colIndex, true);
+        const primary = buildScenarioPreviewTarget(item, item.sourceRow, itemRole, focusColIndex, true);
         if (primary) targets.push(primary);
         if (!includeRelations) return;
         findRelatedOrderRows(item).forEach(({ row, role }) => {
-          const related = buildScenarioPreviewTarget(item, row, role, item.colIndex, false);
+          const related = buildScenarioPreviewTarget(item, row, role, focusColIndex, false);
           if (related) targets.push(related);
         });
       });
@@ -3880,6 +3924,7 @@
         orderName: normalizeCell(row[orderNameCol]) || `第 ${rowIndex + 1} 行`,
         role,
         isPrimary: Boolean(isPrimary),
+        focusColIndex: changedColIndex,
         colIndexes
       };
     }
@@ -4874,6 +4919,7 @@
         file: first.file,
         sheet: first.sheet,
         rowNumber: Number(first.rowNumber),
+        focusColIndex: Number.isInteger(first.focusColIndex) ? first.focusColIndex : null,
         colIndexes: first.colIndexes || [],
         groupTargets: targets,
         groupMessage: notice.message
