@@ -1567,7 +1567,7 @@
             const greenScheduleSheetNames = workbook.SheetNames.slice(0, GREEN_SCHEDULE_SHEET_LIMIT);
             const tables = greenScheduleSheetNames.map((sheetName) => {
               const sheet = workbook.Sheets[sheetName];
-              const range = XLSX.utils.decode_range(sheet["!ref"] || "A1:A1");
+              const range = getEffectiveSheetRange(sheet);
               const rows = [];
               const cells = [];
               for (let r = range.s.r; r <= range.e.r; r += 1) {
@@ -1620,6 +1620,47 @@
         reader.onerror = () => resolve({ text: "", tables: [] });
         reader.readAsArrayBuffer(file);
       });
+    }
+
+    function getEffectiveSheetRange(sheet) {
+      let maxRow = -1;
+      let maxCol = -1;
+
+      Object.keys(sheet || {}).forEach((address) => {
+        if (address.startsWith("!")) return;
+        const cell = sheet[address];
+        const hasValue = cell && cell.v !== undefined && cell.v !== null && cell.v !== "";
+        const hasFormula = cell && cell.f !== undefined && cell.f !== null && String(cell.f).trim();
+        if (!hasValue && !hasFormula) return;
+        try {
+          const position = XLSX.utils.decode_cell(address);
+          maxRow = Math.max(maxRow, position.r);
+          maxCol = Math.max(maxCol, position.c);
+        } catch (error) {
+          // Ignore workbook metadata keys that are not cell addresses.
+        }
+      });
+
+      if (maxRow < 0 || maxCol < 0) return XLSX.utils.decode_range("A1:A1");
+
+      let expanded = true;
+      const merges = sheet["!merges"] || [];
+      while (expanded) {
+        expanded = false;
+        merges.forEach((merge) => {
+          if (merge.s.r > maxRow || merge.s.c > maxCol) return;
+          const nextMaxRow = Math.max(maxRow, merge.e.r);
+          const nextMaxCol = Math.max(maxCol, merge.e.c);
+          if (nextMaxRow !== maxRow || nextMaxCol !== maxCol) expanded = true;
+          maxRow = nextMaxRow;
+          maxCol = nextMaxCol;
+        });
+      }
+
+      return {
+        s: { r: 0, c: 0 },
+        e: { r: maxRow, c: maxCol }
+      };
     }
 
     function formatCellValue(cell) {
@@ -2779,7 +2820,8 @@
         const text = row.map(normalizeCell).join(" ").toLowerCase();
         const score = [
           "购买数量", "购买总价", "orderitem id", "折后单价", "quantity", "count", "contract amount",
-          "total net cost", "total package net", "total net price", "total price after discount", "cost per buying", "periods"
+          "total net cost", "total package net", "total net price", "total price after discount", "cost per buying", "periods",
+          "总净价", "净总价", "投放量", "单价", "媒体", "广告位", "购买形式", "package cost", "net total", "paid total", "payable amount"
         ].reduce((sum, token) => sum + (text.includes(token.toLowerCase()) ? 1 : 0), 0);
         if (score > bestScore) {
           best = index;
@@ -3168,6 +3210,12 @@
       const strict = parseScheduleMonth(value);
       if (strict) return strict;
       const text = normalizeCell(value);
+      const numericMonthWithYear = text.match(/^(20\d{2})\s*[-/.]\s*(\d{1,2})$/);
+      if (numericMonthWithYear) {
+        const year = Number(numericMonthWithYear[1]);
+        const month = Number(numericMonthWithYear[2]);
+        if (month >= 1 && month <= 12) return { year, month };
+      }
       const monthMap = {
         jan: 1, january: 1,
         feb: 2, february: 2,
@@ -3246,12 +3294,35 @@
 
     function findPeriodInText(text) {
       const value = normalizeCell(text);
+      const abbreviatedRangeMatches = [...value.matchAll(/(20\d{2})[年\/.-](\d{1,2})[月\/.-](\d{1,2})日?\s*(?:至|到|[-~～—–])\s*(?:(20\d{2})[年\/.-])?(\d{1,2})[月\/.-](\d{1,2})日?/g)];
       const delimitedMatches = [...value.matchAll(/(\d{4})[年\/.-](\d{1,2})[月\/.-](\d{1,2})日?/g)];
       const compactMatches = [...value.matchAll(/(20\d{2})(\d{2})(\d{2})/g)];
-      const matches = [...delimitedMatches, ...compactMatches]
+      const abbreviatedRangeDates = abbreviatedRangeMatches.flatMap((match) => {
+        const startYear = Number(match[1]);
+        const startMonth = Number(match[2]);
+        const startDay = Number(match[3]);
+        let endYear = Number(match[4] || startYear);
+        const endMonth = Number(match[5]);
+        const endDay = Number(match[6]);
+        if (!match[4] && (endMonth < startMonth || (endMonth === startMonth && endDay < startDay))) {
+          endYear += 1;
+        }
+        return [
+          { year: startYear, month: startMonth, day: startDay },
+          { year: endYear, month: endMonth, day: endDay }
+        ];
+      }).map((item) => ({
+        text: `${item.year}年${String(item.month).padStart(2, "0")}月${String(item.day).padStart(2, "0")}日`,
+        date: new Date(item.year, item.month - 1, item.day).getTime()
+      }));
+      const matches = [
+        ...abbreviatedRangeDates,
+        ...delimitedMatches,
+        ...compactMatches
+      ]
         .map((match) => ({
-          text: `${match[1]}年${String(Number(match[2])).padStart(2, "0")}月${String(Number(match[3])).padStart(2, "0")}日`,
-          date: new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])).getTime()
+          text: match.text || `${match[1]}年${String(Number(match[2])).padStart(2, "0")}月${String(Number(match[3])).padStart(2, "0")}日`,
+          date: match.date ?? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])).getTime()
         }))
         .filter((item) => Number.isFinite(item.date));
       if (!matches.length) return "";
@@ -3498,6 +3569,7 @@
       )));
       const groups = buildNewReplenishmentGroups(newReplenishmentItems);
       const notices = [];
+      const consistencyMismatchGroups = new Map();
       const priorityMismatchGroups = new Map();
 
       groups.forEach((group) => {
@@ -3551,11 +3623,20 @@
         if (!cityComparison.isEqualOrPermittedExclusion) mismatchedFields.push("定向城市");
 
         if (mismatchedFields.length) {
-          notices.push({
-            message: `⚠ 新增补量订单项与原订单项“${originalLabel}”的${mismatchedFields.join("、")}不一致`,
-            severity: "bad",
-            changedFieldLabel: mismatchedFields.join("、"),
-            previewItems: buildScenarioPreviewTargets(group.items, true)
+          const mismatchKey = mismatchedFields.join("｜");
+          if (!consistencyMismatchGroups.has(mismatchKey)) {
+            consistencyMismatchGroups.set(mismatchKey, {
+              fields: [...mismatchedFields],
+              items: new Map()
+            });
+          }
+          group.items.forEach((item) => {
+            const orderId = normalizeCell(item.orderId)
+              || normalizeCell(getExactFieldValue(item.sourceTable, item.sourceRow, GREEN_FIELD_ALIASES.orderItemId));
+            const itemKey = orderId
+              ? `${item.file}｜${item.sheet}｜${orderId}`
+              : adjustmentItemKey(item);
+            consistencyMismatchGroups.get(mismatchKey).items.set(itemKey, item);
           });
         }
 
@@ -3604,6 +3685,24 @@
           });
         }
       });
+
+      Array.from(consistencyMismatchGroups.values())
+        .sort((left, right) => left.fields.join("、").localeCompare(right.fields.join("、"), "zh-CN"))
+        .forEach((group) => {
+          const items = Array.from(group.items.values());
+          const focusAliases = [group.fields[0]].flatMap((field) => {
+            if (field === "净单价") return ["折后单价(￥)", "折后单价", "净单价", "Unit Price after discount (RMB)"];
+            if (field === "频次控制") return ["频次控制"];
+            if (field === "定向城市") return ["地域定向", "定向城市", "城市定向"];
+            return [field];
+          });
+          notices.push({
+            message: `⚠ 新增补量订单项与原订单项的${group.fields.join("、")}不一致（${items.length}个订单项）`,
+            severity: "bad",
+            changedFieldLabel: group.fields.join("、"),
+            previewItems: buildScenarioPreviewTargets(items, true, focusAliases)
+          });
+        });
 
       Array.from(priorityMismatchGroups.values())
         .sort((left, right) => (
