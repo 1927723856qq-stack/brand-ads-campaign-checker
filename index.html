@@ -1582,6 +1582,7 @@
                     rowIndex: r,
                     colIndex: c,
                     value,
+                    rawNumber: cell?.t === "n" && Number.isFinite(cell.v) ? cell.v : undefined,
                     formula: cell && cell.f ? String(cell.f) : "",
                     yellow: isYellowCell(cell),
                     style: cell && cell.s ? cell.s : null
@@ -2512,6 +2513,7 @@
     }
 
     function findIdenticalExecutionTemplatePair(records) {
+      let firstMatch = null;
       for (let leftIndex = 0; leftIndex < records.length; leftIndex += 1) {
         for (let rightIndex = leftIndex + 1; rightIndex < records.length; rightIndex += 1) {
           const left = records[leftIndex];
@@ -2522,10 +2524,10 @@
           const rightExplicitExecution = isExplicitExecutionFile(right.file.name);
           if (leftExplicitExecution && !rightExplicitExecution) return { client: right, execution: left };
           if (rightExplicitExecution && !leftExplicitExecution) return { client: left, execution: right };
-          return { client: left, execution: right };
+          if (!firstMatch) firstMatch = { client: left, execution: right };
         }
       }
-      return null;
+      return firstMatch;
     }
 
     function isExplicitExecutionFile(fileName) {
@@ -2534,19 +2536,29 @@
 
     function recordsHaveIdenticalBusinessContent(left, right) {
       if (!left || !right) return false;
-      return getTableBusinessSignature(left.table) === getTableBusinessSignature(right.table);
+      const compareRawNumbers = [left, right].every(({ file }) => (
+        ["xlsx", "xls"].includes(getExtension(file.name))
+      ));
+      return getTableBusinessSignature(left.table, compareRawNumbers)
+        === getTableBusinessSignature(right.table, compareRawNumbers);
     }
 
-    function getTableBusinessSignature(table) {
+    function getTableBusinessSignature(table, compareRawNumbers) {
       if (!table) return "";
       const rows = table.rows || [];
       const cells = table.cells || [];
+      const getValue = (rowIndex, colIndex) => {
+        const displayedValue = rows[rowIndex]?.[colIndex];
+        return normalizeCell(compareRawNumbers
+          ? cells[rowIndex]?.[colIndex]?.rawNumber ?? displayedValue
+          : displayedValue);
+      };
       let lastRow = -1;
       let lastCol = -1;
       rows.forEach((row, rowIndex) => {
-        (row || []).forEach((value, colIndex) => {
+        (row || []).forEach((_, colIndex) => {
           const formula = normalizeCell(cells[rowIndex] && cells[rowIndex][colIndex] && cells[rowIndex][colIndex].formula);
-          if (!normalizeCell(value) && !formula) return;
+          if (!getValue(rowIndex, colIndex) && !formula) return;
           lastRow = Math.max(lastRow, rowIndex);
           lastCol = Math.max(lastCol, colIndex);
         });
@@ -2559,7 +2571,7 @@
         for (let colIndex = 0; colIndex <= lastCol; colIndex += 1) {
           const meta = cells[rowIndex] && cells[rowIndex][colIndex];
           row.push([
-            normalizeCell(rows[rowIndex] && rows[rowIndex][colIndex]),
+            getValue(rowIndex, colIndex),
             normalizeCell(meta && meta.formula)
           ]);
         }
